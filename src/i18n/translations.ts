@@ -26,6 +26,7 @@ export interface TranslationStrings {
     cyclesCompleted: string;
     nextAlarmAt: string;
     startsAt: string;
+    readyInRange: string;
     noActiveDay: string;
     timelineTitle: string;
     focusLabel: string;
@@ -36,6 +37,8 @@ export interface TranslationStrings {
       resume: string;
       startRest: string;
       startFocus: string;
+      stopFocus: string;
+      createCustom: string;
       skipRest: string;
       snooze5: string;
       resetDay: string;
@@ -77,6 +80,7 @@ export interface TranslationStrings {
     voiceDesc: string;
     vibrationLabel: string;
     saveButton: string;
+    saveAndStartButton: string;
     savedToast: string;
     permissionsTitle: string;
     exactAlarmOk: string;
@@ -119,7 +123,7 @@ export const translations: Record<AppLanguage, TranslationStrings> = {
       stats: 'পরিসংখ্যান',
     },
     phases: {
-      inactive: 'বন্ধ আছে',
+      inactive: 'শুরু হয়নি',
       outside_range: 'সময়ের বাইরে',
       focusing: 'ফোকাস চলছে',
       resting: 'রেস্ট চলছে',
@@ -137,6 +141,7 @@ export const translations: Record<AppLanguage, TranslationStrings> = {
       cyclesCompleted: 'সম্পন্ন সাইকেল',
       nextAlarmAt: 'পরবর্তী অ্যালার্ম',
       startsAt: 'শুরু হবে',
+      readyInRange: 'শিডিউল প্রস্তুত · শুরু করতে নিচে ট্যাপ করুন',
       noActiveDay: 'আজকের দিনটি অ্যাক্টিভ দিনে সিলেক্ট করা নেই',
       timelineTitle: 'আজকের টাইমলাইন',
       focusLabel: 'ফোকাস',
@@ -147,6 +152,8 @@ export const translations: Record<AppLanguage, TranslationStrings> = {
         resume: 'চালু করুন',
         startRest: 'রেস্ট শুরু করুন',
         startFocus: 'ফোকাস শুরু করুন',
+        stopFocus: 'ফোকাস বন্ধ করুন',
+        createCustom: 'কাস্টম প্রোফাইল',
         skipRest: 'রেস্ট স্কিপ',
         snooze5: '+৫ মি. স্নুজ',
         resetDay: 'রিসেট',
@@ -187,8 +194,9 @@ export const translations: Record<AppLanguage, TranslationStrings> = {
       voiceLabel: 'ভয়েস অ্যানাউন্সমেন্ট',
       voiceDesc: 'অ্যাপ খোলা থাকলে মুখে বলে দেবে, আর লকড থাকলে নোটিফিকেশন ভয়েস ক্লিপ বাজবে।',
       vibrationLabel: 'ভাইব্রেশন',
-      saveButton: 'সেভ ও অ্যালার্ম শিডিউল করুন',
-      savedToast: 'শিডিউল সেভ ও অ্যালার্ম আপডেট হয়েছে!',
+      saveButton: 'প্রোফাইল সেভ করুন',
+      saveAndStartButton: 'সেভ ও ফোকাস শুরু করুন',
+      savedToast: 'প্রোফাইল সেভ হয়েছে! চাইলে এখনই ফোকাস শুরু করতে পারেন।',
       permissionsTitle: 'পারমিশন ও ডিভাইস',
       exactAlarmOk: 'Exact Alarm পারমিশন চালু আছে',
       exactAlarmMissing: 'সঠিক সময়ে অ্যালার্মের জন্য Exact Alarm পারমিশন দিন',
@@ -229,7 +237,7 @@ export const translations: Record<AppLanguage, TranslationStrings> = {
       stats: 'Stats',
     },
     phases: {
-      inactive: 'Disabled',
+      inactive: 'Not Started',
       outside_range: 'Outside Range',
       focusing: 'Focusing',
       resting: 'Resting',
@@ -247,6 +255,7 @@ export const translations: Record<AppLanguage, TranslationStrings> = {
       cyclesCompleted: 'Cycles Completed',
       nextAlarmAt: 'Next Alarm',
       startsAt: 'Starts at',
+      readyInRange: 'Schedule ready · Tap Start Focus to begin',
       noActiveDay: 'Today is not selected in Active Days',
       timelineTitle: "Today's Timeline",
       focusLabel: 'Focus',
@@ -257,6 +266,8 @@ export const translations: Record<AppLanguage, TranslationStrings> = {
         resume: 'Resume',
         startRest: 'Start Rest',
         startFocus: 'Start Focus',
+        stopFocus: 'Stop Focus',
+        createCustom: 'Custom Profile',
         skipRest: 'Skip Rest',
         snooze5: 'Snooze +5m',
         resetDay: 'Reset',
@@ -299,8 +310,9 @@ export const translations: Record<AppLanguage, TranslationStrings> = {
       voiceDesc:
         'Speaks dynamic focus totals in foreground and uses bundled voice clips on locked screen.',
       vibrationLabel: 'Vibration',
-      saveButton: 'Save & Schedule Alarms',
-      savedToast: 'Schedule saved and alarms updated!',
+      saveButton: 'Save Profile',
+      saveAndStartButton: 'Save & Start Focus',
+      savedToast: 'Profile saved! Start focus whenever you are ready.',
       permissionsTitle: 'Permissions & Device',
       exactAlarmOk: 'Exact Alarm permission granted',
       exactAlarmMissing: 'Grant Exact Alarm permission for on-time alarms',

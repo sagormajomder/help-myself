@@ -67,9 +67,11 @@ interface FocusContextValue {
   activeAlarm: AlarmEvent | null;
   statsRevision: number;
   updateSettings: (patch: Partial<AppSettings>) => Promise<void>;
-  saveProfile: (profile: FocusProfile) => Promise<void>;
+  saveProfile: (profile: FocusProfile, startImmediately?: boolean) => Promise<void>;
   setActiveProfileId: (id: string) => Promise<void>;
   deleteProfile: (id: string) => Promise<void>;
+  startFocus: () => Promise<void>;
+  stopFocus: () => Promise<void>;
   pauseTimer: () => Promise<void>;
   resumeTimer: () => Promise<void>;
   startRestFromAck: () => Promise<void>;
@@ -85,6 +87,132 @@ interface FocusContextValue {
 const FocusContext = createContext<FocusContextValue | null>(null);
 
 configureForegroundNotificationHandler();
+
+function isRuntimeHalted(r: RuntimeTimerState | null | undefined): boolean {
+  return (
+    !r ||
+    !r.startedByUser ||
+    r.phase === 'inactive' ||
+    r.phase === 'completed_range' ||
+    r.pausedAt !== null ||
+    r.pendingAckType !== null
+  );
+}
+
+function buildInactiveRuntime(
+  profileId: string,
+  windowKey: string,
+  completedFocusMinutesToday: number = 0,
+  completedCyclesToday: number = 0
+): RuntimeTimerState {
+  return {
+    profileId,
+    windowKey,
+    phase: 'inactive',
+    currentSlotIndex: 0,
+    pausedAt: null,
+    shiftOffsetMs: 0,
+    pendingAckType: null,
+    completedFocusMinutesToday,
+    completedCyclesToday,
+    startedByUser: false,
+  };
+}
+
+function buildStartedRuntime(params: {
+  profile: FocusProfile;
+  win: { windowStartAt: number; windowEndAt: number; isActiveDay: boolean } | null;
+  slots: TimelineSlot[];
+  windowKey: string;
+  nowMs: number;
+  completedFocusMinutesToday?: number;
+  completedCyclesToday?: number;
+}): RuntimeTimerState {
+  const {
+    profile,
+    win,
+    slots,
+    windowKey,
+    nowMs,
+    completedFocusMinutesToday = 0,
+    completedCyclesToday = 0,
+  } = params;
+
+  if (!win || !win.isActiveDay) {
+    return {
+      profileId: profile.id,
+      windowKey,
+      phase: 'outside_range',
+      currentSlotIndex: 0,
+      pausedAt: null,
+      shiftOffsetMs: 0,
+      pendingAckType: null,
+      completedFocusMinutesToday,
+      completedCyclesToday,
+      startedByUser: true,
+    };
+  }
+
+  const slot = findSlotAtTime(slots, nowMs, 0);
+  if (!slot) {
+    return {
+      profileId: profile.id,
+      windowKey,
+      phase: nowMs >= win.windowEndAt ? 'completed_range' : 'outside_range',
+      currentSlotIndex: 0,
+      pausedAt: null,
+      shiftOffsetMs: 0,
+      pendingAckType: null,
+      completedFocusMinutesToday,
+      completedCyclesToday,
+      startedByUser: true,
+    };
+  }
+
+  // If the user taps Start Focus during a scheduled rest slot, jump straight into the next focus slot
+  if (slot.type === 'rest') {
+    const nextFocusSlot = slots[slot.index + 1];
+    if (nextFocusSlot) {
+      return {
+        profileId: profile.id,
+        windowKey,
+        phase: 'focusing',
+        currentSlotIndex: nextFocusSlot.index,
+        pausedAt: null,
+        shiftOffsetMs: nowMs - nextFocusSlot.startAt,
+        pendingAckType: null,
+        completedFocusMinutesToday,
+        completedCyclesToday,
+        startedByUser: true,
+      };
+    }
+    return {
+      profileId: profile.id,
+      windowKey,
+      phase: 'resting',
+      currentSlotIndex: slot.index,
+      pausedAt: null,
+      shiftOffsetMs: 0,
+      pendingAckType: null,
+      completedFocusMinutesToday,
+      completedCyclesToday,
+      startedByUser: true,
+    };
+  }
+
+  return {
+    profileId: profile.id,
+    windowKey,
+    phase: 'focusing',
+    currentSlotIndex: slot.index,
+    pausedAt: null,
+    shiftOffsetMs: 0,
+    pendingAckType: null,
+    completedFocusMinutesToday,
+    completedCyclesToday,
+    startedByUser: true,
+  };
+}
 
 export function FocusProvider({ children }: { children: React.ReactNode }) {
   const [ready, setReady] = useState(false);
@@ -169,21 +297,21 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
       const wKey = win ? getWindowKey(currentActive.id, win.windowStartAt) : `${currentActive.id}:none`;
 
       let initialRuntime: RuntimeTimerState;
-      if (loadedRuntime && loadedRuntime.windowKey === wKey) {
+      if (
+        loadedRuntime &&
+        loadedRuntime.windowKey === wKey &&
+        loadedRuntime.startedByUser &&
+        loadedRuntime.phase !== 'inactive'
+      ) {
         initialRuntime = loadedRuntime;
       } else {
-        const slot = findSlotAtTime(winSlots, now, 0);
-        initialRuntime = {
-          profileId: currentActive.id,
-          windowKey: wKey,
-          phase: !win || !win.isActiveDay ? 'outside_range' : slot ? (slot.type === 'focus' ? 'focusing' : 'resting') : 'outside_range',
-          currentSlotIndex: slot?.index ?? 0,
-          pausedAt: null,
-          shiftOffsetMs: 0,
-          pendingAckType: null,
-          completedFocusMinutesToday: 0,
-          completedCyclesToday: 0,
-        };
+        const sameWindow = loadedRuntime && loadedRuntime.windowKey === wKey;
+        initialRuntime = buildInactiveRuntime(
+          currentActive.id,
+          wKey,
+          sameWindow ? loadedRuntime.completedFocusMinutesToday : 0,
+          sameWindow ? loadedRuntime.completedCyclesToday : 0
+        );
         await saveRuntimeState(initialRuntime);
       }
 
@@ -191,17 +319,12 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
       setRuntime(initialRuntime);
       setReady(true);
 
-      const isHalted =
-        initialRuntime.pausedAt !== null ||
-        initialRuntime.pendingAckType !== null ||
-        initialRuntime.phase === 'completed_range';
-
       await syncNotifications(
         currentActive,
         winSlots,
         loadedSettings,
         initialRuntime.shiftOffsetMs,
-        isHalted
+        isRuntimeHalted(initialRuntime)
       );
     })();
     return () => {
@@ -290,38 +413,16 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
 
       if (!curRuntime || !curWindow) return;
 
-      // Reset runtime when day/window rolls over
+      // Reset runtime to inactive when day/window rolls over
       if (curRuntime.windowKey !== curWindowKey) {
-        const slot = findSlotAtTime(curSlots, tickNowMs, 0);
-        const next: RuntimeTimerState = {
-          profileId: curProfile.id,
-          windowKey: curWindowKey,
-          phase: !curWindow.isActiveDay
-            ? 'outside_range'
-            : slot
-              ? slot.type === 'focus'
-                ? 'focusing'
-                : 'resting'
-              : 'outside_range',
-          currentSlotIndex: slot?.index ?? 0,
-          pausedAt: null,
-          shiftOffsetMs: 0,
-          pendingAckType: null,
-          completedFocusMinutesToday: 0,
-          completedCyclesToday: 0,
-        };
+        const next = buildInactiveRuntime(curProfile.id, curWindowKey);
         setRuntime(next);
         void saveRuntimeState(next);
-        void syncNotifications(curProfile, curSlots, curSettings, 0, false);
+        void syncNotifications(curProfile, curSlots, curSettings, 0, true);
         return;
       }
 
-      if (
-        curRuntime.pausedAt !== null ||
-        curRuntime.pendingAckType !== null ||
-        curRuntime.phase === 'completed_range' ||
-        curSlots.length === 0
-      ) {
+      if (isRuntimeHalted(curRuntime) || curSlots.length === 0) {
         return;
       }
 
@@ -367,6 +468,7 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
             };
             setRuntime(nextState);
             void saveRuntimeState(nextState);
+            void cancelAllScheduledAlarms();
             void triggerAlarm(
               {
                 type: 'range_complete',
@@ -658,35 +760,62 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
     await syncNotifications(activeProfile, slots, settings, nextShift, false);
   }, [activeProfile, runtime, settings, slots, syncNotifications, windowKey]);
 
+  const startFocus = useCallback(async () => {
+    stopAlarmSound();
+    await stopSpeech();
+    setActiveAlarm(null);
+    handledSlotsRef.current.clear();
+
+    const next = buildStartedRuntime({
+      profile: activeProfile,
+      win: resolvedWindow,
+      slots,
+      windowKey,
+      nowMs: Date.now(),
+      completedFocusMinutesToday:
+        runtime?.windowKey === windowKey ? runtime.completedFocusMinutesToday : 0,
+      completedCyclesToday:
+        runtime?.windowKey === windowKey ? runtime.completedCyclesToday : 0,
+    });
+    setRuntime(next);
+    await saveRuntimeState(next);
+    await syncNotifications(
+      activeProfile,
+      slots,
+      settings,
+      next.shiftOffsetMs,
+      isRuntimeHalted(next)
+    );
+  }, [activeProfile, resolvedWindow, runtime, settings, slots, syncNotifications, windowKey]);
+
+  const stopFocus = useCallback(async () => {
+    stopAlarmSound();
+    await stopSpeech();
+    setActiveAlarm(null);
+    handledSlotsRef.current.clear();
+
+    const next = buildInactiveRuntime(
+      activeProfile.id,
+      windowKey,
+      runtime?.windowKey === windowKey ? runtime.completedFocusMinutesToday : 0,
+      runtime?.windowKey === windowKey ? runtime.completedCyclesToday : 0
+    );
+    setRuntime(next);
+    await saveRuntimeState(next);
+    await cancelAllScheduledAlarms();
+  }, [activeProfile.id, runtime, windowKey]);
+
   const resetDay = useCallback(async () => {
     stopAlarmSound();
     await stopSpeech();
     setActiveAlarm(null);
     handledSlotsRef.current.clear();
 
-    const now = Date.now();
-    const slot = findSlotAtTime(slots, now, 0);
-    const next: RuntimeTimerState = {
-      profileId: activeProfile.id,
-      windowKey,
-      phase: !resolvedWindow?.isActiveDay
-        ? 'outside_range'
-        : slot
-          ? slot.type === 'focus'
-            ? 'focusing'
-            : 'resting'
-          : 'outside_range',
-      currentSlotIndex: slot?.index ?? 0,
-      pausedAt: null,
-      shiftOffsetMs: 0,
-      pendingAckType: null,
-      completedFocusMinutesToday: 0,
-      completedCyclesToday: 0,
-    };
+    const next = buildInactiveRuntime(activeProfile.id, windowKey, 0, 0);
     setRuntime(next);
     await saveRuntimeState(next);
-    await syncNotifications(activeProfile, slots, settings, 0, false);
-  }, [activeProfile, resolvedWindow, settings, slots, syncNotifications, windowKey]);
+    await cancelAllScheduledAlarms();
+  }, [activeProfile.id, windowKey]);
 
   // Listen for notification action buttons
   useEffect(() => {
@@ -706,7 +835,11 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
   }, [skipRest, snooze5Min, startFocusFromAck, startRestFromAck]);
 
   const applyNewProfilesAndResync = useCallback(
-    async (nextProfiles: FocusProfile[], nextSettings: AppSettings) => {
+    async (
+      nextProfiles: FocusProfile[],
+      nextSettings: AppSettings,
+      startImmediately: boolean = false
+    ) => {
       const target =
         nextProfiles.find((p) => p.isActive) ?? nextProfiles[0] ?? DEFAULT_PROFILES[0];
       const now = Date.now();
@@ -715,31 +848,38 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
         ? buildWindowSchedule(target, win.windowStartAt, win.windowEndAt).slots
         : [];
       const wKey = win ? getWindowKey(target.id, win.windowStartAt) : `${target.id}:none`;
-      const slot = findSlotAtTime(winSlots, now, 0);
+      const sameWindow = runtime?.windowKey === wKey;
+      const prevMinutes = sameWindow ? runtime.completedFocusMinutesToday : 0;
+      const prevCycles = sameWindow ? runtime.completedCyclesToday : 0;
 
+      stopAlarmSound();
+      await stopSpeech();
+      setActiveAlarm(null);
       handledSlotsRef.current.clear();
-      const nextRuntime: RuntimeTimerState = {
-        profileId: target.id,
-        windowKey: wKey,
-        phase: !win || !win.isActiveDay
-          ? 'outside_range'
-          : slot
-            ? slot.type === 'focus'
-              ? 'focusing'
-              : 'resting'
-            : 'outside_range',
-        currentSlotIndex: slot?.index ?? 0,
-        pausedAt: null,
-        shiftOffsetMs: 0,
-        pendingAckType: null,
-        completedFocusMinutesToday: runtime?.completedFocusMinutesToday ?? 0,
-        completedCyclesToday: runtime?.completedCyclesToday ?? 0,
-      };
+
+      const nextRuntime = startImmediately
+        ? buildStartedRuntime({
+            profile: target,
+            win,
+            slots: winSlots,
+            windowKey: wKey,
+            nowMs: now,
+            completedFocusMinutesToday: prevMinutes,
+            completedCyclesToday: prevCycles,
+          })
+        : buildInactiveRuntime(target.id, wKey, prevMinutes, prevCycles);
+
       setRuntime(nextRuntime);
       await saveRuntimeState(nextRuntime);
-      await syncNotifications(target, winSlots, nextSettings, 0, false);
+      await syncNotifications(
+        target,
+        winSlots,
+        nextSettings,
+        nextRuntime.shiftOffsetMs,
+        isRuntimeHalted(nextRuntime)
+      );
     },
-    [runtime?.completedCyclesToday, runtime?.completedFocusMinutesToday, syncNotifications]
+    [runtime, syncNotifications]
   );
 
   const updateSettings = useCallback(
@@ -748,23 +888,19 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
       setSettings(next);
       await saveSettings(next);
       await setupNotificationChannelsAndCategories(next.language);
-      const isHalted =
-        runtime?.pausedAt !== null ||
-        runtime?.pendingAckType !== null ||
-        runtime?.phase === 'completed_range';
       await syncNotifications(
         activeProfile,
         slots,
         next,
         runtime?.shiftOffsetMs ?? 0,
-        Boolean(isHalted)
+        isRuntimeHalted(runtime)
       );
     },
     [activeProfile, runtime, settings, slots, syncNotifications]
   );
 
   const saveProfile = useCallback(
-    async (profile: FocusProfile) => {
+    async (profile: FocusProfile, startImmediately: boolean = false) => {
       const exists = profiles.some((p) => p.id === profile.id);
       let next = exists
         ? profiles.map((p) => (p.id === profile.id ? profile : p))
@@ -774,7 +910,7 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
       }
       setProfiles(next);
       await saveProfiles(next);
-      await applyNewProfilesAndResync(next, settings);
+      await applyNewProfilesAndResync(next, settings, startImmediately);
     },
     [applyNewProfilesAndResync, profiles, settings]
   );
@@ -831,7 +967,7 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
 
   const shift = runtime?.shiftOffsetMs ?? 0;
   const currentSlot = runtime ? (slots[runtime.currentSlotIndex] ?? null) : null;
-  const phase: TimerPhase = runtime?.phase ?? 'outside_range';
+  const phase: TimerPhase = runtime?.phase ?? 'inactive';
 
   let remainingMs = 0;
   let progress = 0;
@@ -849,6 +985,8 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
     }
   } else if (phase === 'outside_range' && resolvedWindow) {
     remainingMs = Math.max(0, resolvedWindow.windowStartAt - nowMs);
+  } else if (phase === 'inactive') {
+    remainingMs = Math.max(1, activeProfile.focusMinutes) * 60_000;
   }
 
   const value: FocusContextValue = {
@@ -875,6 +1013,8 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
     saveProfile,
     setActiveProfileId,
     deleteProfile,
+    startFocus,
+    stopFocus,
     pauseTimer,
     resumeTimer,
     startRestFromAck,

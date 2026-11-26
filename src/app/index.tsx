@@ -18,13 +18,18 @@ import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
 import { useFocus } from '@/context/focus-context';
 import { useTheme } from '@/hooks/use-theme';
 import { formatDurationText } from '@/i18n/translations';
-import { formatClockTime, formatMinuteOfDay } from '@/utils/schedule-calculator';
+import {
+  findSlotAtTime,
+  formatClockTime,
+  formatMinuteOfDay,
+} from '@/utils/schedule-calculator';
 
 export default function TodayScreen() {
   const safeInsets = useSafeAreaInsets();
   const theme = useTheme();
   const {
     ready,
+    nowMs,
     settings,
     t,
     profiles,
@@ -41,6 +46,8 @@ export default function TodayScreen() {
     nextAlarmAt,
     activeAlarm,
     setActiveProfileId,
+    startFocus,
+    stopFocus,
     pauseTimer,
     resumeTimer,
     startRestFromAck,
@@ -64,7 +71,15 @@ export default function TodayScreen() {
   const bottomPadding = safeInsets.bottom + BottomTabInset + Spacing.four;
 
   let subtitleLabel = '';
-  if (phase === 'outside_range') {
+  if (phase === 'inactive') {
+    if (!isActiveDay) {
+      subtitleLabel = t.today.noActiveDay;
+    } else if (findSlotAtTime(slots, nowMs, 0)) {
+      subtitleLabel = t.today.readyInRange;
+    } else if (windowStartAt) {
+      subtitleLabel = `${t.today.startsAt}: ${formatClockTime(windowStartAt)}`;
+    }
+  } else if (phase === 'outside_range') {
     if (!isActiveDay) {
       subtitleLabel = t.today.noActiveDay;
     } else if (windowStartAt) {
@@ -161,6 +176,62 @@ export default function TodayScreen() {
 
           {/* Primary Controls */}
           <View style={styles.controlsWrap}>
+            {phase === 'inactive' && (
+              <>
+                <Pressable
+                  style={[styles.primaryBtn, { backgroundColor: '#2563EB' }]}
+                  onPress={() => void startFocus()}>
+                  <ThemedText style={styles.primaryBtnText}>
+                    {t.today.actions.startFocus}
+                  </ThemedText>
+                </Pressable>
+                <View style={styles.controlRow}>
+                  <Pressable
+                    style={[styles.secondaryBtn, { backgroundColor: theme.backgroundElement }]}
+                    onPress={() => router.push('/schedule')}>
+                    <ThemedText style={styles.secondaryBtnText}>
+                      {t.today.actions.createCustom}
+                    </ThemedText>
+                  </Pressable>
+                  <Pressable
+                    style={[styles.secondaryBtn, { backgroundColor: theme.backgroundElement }]}
+                    onPress={() => void testAlarm()}>
+                    <ThemedText style={styles.secondaryBtnText}>
+                      {t.today.actions.testAlarm}
+                    </ThemedText>
+                  </Pressable>
+                  {(todayFocusMinutes > 0 || completedCyclesToday > 0) && (
+                    <Pressable
+                      style={[styles.secondaryBtn, { backgroundColor: theme.backgroundElement }]}
+                      onPress={() => void resetDay()}>
+                      <ThemedText style={styles.secondaryBtnText}>
+                        {t.today.actions.resetDay}
+                      </ThemedText>
+                    </Pressable>
+                  )}
+                </View>
+              </>
+            )}
+
+            {phase === 'outside_range' && (
+              <View style={styles.controlRow}>
+                <Pressable
+                  style={[styles.secondaryBtn, { backgroundColor: '#DC262622' }]}
+                  onPress={() => void stopFocus()}>
+                  <ThemedText style={[styles.secondaryBtnText, { color: '#DC2626' }]}>
+                    {t.today.actions.stopFocus}
+                  </ThemedText>
+                </Pressable>
+                <Pressable
+                  style={[styles.secondaryBtn, { backgroundColor: theme.backgroundElement }]}
+                  onPress={() => void testAlarm()}>
+                  <ThemedText style={styles.secondaryBtnText}>
+                    {t.today.actions.testAlarm}
+                  </ThemedText>
+                </Pressable>
+              </View>
+            )}
+
             {(phase === 'focusing' || phase === 'resting') && (
               <View style={styles.controlRow}>
                 <Pressable
@@ -192,10 +263,10 @@ export default function TodayScreen() {
                   </ThemedText>
                 </Pressable>
                 <Pressable
-                  style={[styles.secondaryBtn, { backgroundColor: theme.backgroundElement }]}
-                  onPress={() => void resetDay()}>
-                  <ThemedText style={styles.secondaryBtnText}>
-                    {t.today.actions.resetDay}
+                  style={[styles.secondaryBtn, { backgroundColor: '#DC262622' }]}
+                  onPress={() => void stopFocus()}>
+                  <ThemedText style={[styles.secondaryBtnText, { color: '#DC2626' }]}>
+                    {t.today.actions.stopFocus}
                   </ThemedText>
                 </Pressable>
               </View>
@@ -241,22 +312,33 @@ export default function TodayScreen() {
               </Pressable>
             )}
 
-            <View style={styles.controlRow}>
-              <Pressable
-                style={[styles.secondaryBtn, { backgroundColor: theme.backgroundElement }]}
-                onPress={() => void testAlarm()}>
-                <ThemedText style={styles.secondaryBtnText}>
-                  {t.today.actions.testAlarm}
-                </ThemedText>
-              </Pressable>
-              <Pressable
-                style={[styles.secondaryBtn, { backgroundColor: theme.backgroundElement }]}
-                onPress={() => void resetDay()}>
-                <ThemedText style={styles.secondaryBtnText}>
-                  {t.today.actions.resetDay}
-                </ThemedText>
-              </Pressable>
-            </View>
+            {phase !== 'inactive' && phase !== 'outside_range' && (
+              <View style={styles.controlRow}>
+                {phase !== 'paused' && phase !== 'completed_range' && (
+                  <Pressable
+                    style={[styles.secondaryBtn, { backgroundColor: '#DC262622' }]}
+                    onPress={() => void stopFocus()}>
+                    <ThemedText style={[styles.secondaryBtnText, { color: '#DC2626' }]}>
+                      {t.today.actions.stopFocus}
+                    </ThemedText>
+                  </Pressable>
+                )}
+                <Pressable
+                  style={[styles.secondaryBtn, { backgroundColor: theme.backgroundElement }]}
+                  onPress={() => void testAlarm()}>
+                  <ThemedText style={styles.secondaryBtnText}>
+                    {t.today.actions.testAlarm}
+                  </ThemedText>
+                </Pressable>
+                <Pressable
+                  style={[styles.secondaryBtn, { backgroundColor: theme.backgroundElement }]}
+                  onPress={() => void resetDay()}>
+                  <ThemedText style={styles.secondaryBtnText}>
+                    {t.today.actions.resetDay}
+                  </ThemedText>
+                </Pressable>
+              </View>
+            )}
           </View>
 
           {/* Today's Timeline */}
@@ -264,7 +346,11 @@ export default function TodayScreen() {
             <ThemedText type="smallBold">{t.today.timelineTitle}</ThemedText>
             <View style={styles.timelineList}>
               {slots.slice(0, 24).map((slot) => {
-                const isCurrent = currentSlot?.index === slot.index && phase !== 'outside_range';
+                const isCurrent =
+                  currentSlot?.index === slot.index &&
+                  phase !== 'outside_range' &&
+                  phase !== 'inactive' &&
+                  phase !== 'completed_range';
                 const isFocus = slot.type === 'focus';
                 const accent = isFocus ? '#2563EB' : '#059669';
                 return (

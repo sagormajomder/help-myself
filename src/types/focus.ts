@@ -67,6 +67,8 @@ export interface RuntimeTimerState {
   completedFocusMinutesToday: number;
   /** Number of focus cycles completed in current window */
   completedCyclesToday: number;
+  /** Whether the user explicitly started focus for this window */
+  startedByUser?: boolean;
 }
 
 export interface FocusSessionLog {

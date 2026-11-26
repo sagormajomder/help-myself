@@ -1,6 +1,7 @@
 import DateTimePicker, {
   type DateTimePickerEvent,
 } from '@react-native-community/datetimepicker';
+import { router } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
   Alert,
@@ -49,6 +50,7 @@ export default function ScheduleScreen() {
     deleteProfile,
   } = useFocus();
 
+  const [syncedProfileId, setSyncedProfileId] = useState(activeProfile.id);
   const [editingId, setEditingId] = useState(activeProfile.id);
   const [name, setName] = useState(activeProfile.name);
   const [startMinute, setStartMinute] = useState(activeProfile.startMinuteOfDay);
@@ -62,6 +64,7 @@ export default function ScheduleScreen() {
   const [exactAlarmOk, setExactAlarmOk] = useState(true);
 
   const populateFormFromProfile = (selected: FocusProfile) => {
+    setSyncedProfileId(selected.id);
     setEditingId(selected.id);
     setName(selected.name);
     setStartMinute(selected.startMinuteOfDay);
@@ -70,6 +73,10 @@ export default function ScheduleScreen() {
     setRestText(String(selected.restMinutes));
     setActiveDays(selected.activeDays);
   };
+
+  if (activeProfile.id !== syncedProfileId) {
+    populateFormFromProfile(activeProfile);
+  }
 
   useEffect(() => {
     void ensureNotificationPermissions().then((res) => {
@@ -91,11 +98,11 @@ export default function ScheduleScreen() {
       endMinuteOfDay: 17 * 60,
       focusMinutes: 45,
       restMinutes: 5,
-      activeDays: [0, 1, 2, 3, 4],
+      activeDays: [0, 1, 2, 3, 4, 5, 6],
       isActive: true,
     };
     populateFormFromProfile(newProfile);
-    void saveProfile(newProfile);
+    void saveProfile(newProfile, false);
   };
 
   const handleTimeChange = (event: DateTimePickerEvent, selectedDate?: Date) => {
@@ -129,7 +136,7 @@ export default function ScheduleScreen() {
     });
   };
 
-  const handleSave = async () => {
+  const handleSave = async (startImmediately: boolean) => {
     const focusNum = Number.parseInt(focusText, 10);
     const restNum = Number.parseInt(restText, 10);
 
@@ -139,16 +146,24 @@ export default function ScheduleScreen() {
     }
 
     const trimmedName = name.trim() || t.schedule.newProfileDefault;
-    await saveProfile({
-      id: editingId,
-      name: trimmedName,
-      startMinuteOfDay: startMinute,
-      endMinuteOfDay: endMinute,
-      focusMinutes: focusNum,
-      restMinutes: restNum,
-      activeDays,
-      isActive: true,
-    });
+    await saveProfile(
+      {
+        id: editingId,
+        name: trimmedName,
+        startMinuteOfDay: startMinute,
+        endMinuteOfDay: endMinute,
+        focusMinutes: focusNum,
+        restMinutes: restNum,
+        activeDays,
+        isActive: true,
+      },
+      startImmediately
+    );
+
+    if (startImmediately) {
+      router.navigate('/');
+      return;
+    }
 
     setFeedbackMsg(t.schedule.savedToast);
     setTimeout(() => setFeedbackMsg(null), 3000);
@@ -390,11 +405,20 @@ export default function ScheduleScreen() {
             </View>
           </View>
 
-          <Pressable
-            style={[styles.saveBtn, { backgroundColor: '#2563EB' }]}
-            onPress={() => void handleSave()}>
-            <ThemedText style={styles.saveBtnText}>{t.schedule.saveButton}</ThemedText>
-          </Pressable>
+          <View style={styles.saveActionsRow}>
+            <Pressable
+              style={[styles.saveBtn, { backgroundColor: theme.backgroundElement, flex: 1 }]}
+              onPress={() => void handleSave(false)}>
+              <ThemedText style={[styles.saveBtnText, { color: theme.text }]}>
+                {t.schedule.saveButton}
+              </ThemedText>
+            </Pressable>
+            <Pressable
+              style={[styles.saveBtn, { backgroundColor: '#2563EB', flex: 1 }]}
+              onPress={() => void handleSave(true)}>
+              <ThemedText style={styles.saveBtnText}>{t.schedule.saveAndStartButton}</ThemedText>
+            </Pressable>
+          </View>
 
           {feedbackMsg && (
             <View style={[styles.toastBox, { backgroundColor: '#05966922' }]}>
@@ -625,15 +649,21 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     alignItems: 'center',
   },
+  saveActionsRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
   saveBtn: {
     paddingVertical: 15,
+    paddingHorizontal: 10,
     borderRadius: 14,
     alignItems: 'center',
   },
   saveBtnText: {
     color: '#FFFFFF',
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '700',
+    textAlign: 'center',
   },
   toastBox: {
     padding: 12,
