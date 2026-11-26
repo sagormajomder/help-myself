@@ -1,5 +1,6 @@
 import {
   buildFocusDoneMessage,
+  buildIndividualDoneMessage,
   buildRangeDoneMessage,
   buildRestDoneMessage,
   formatDurationText,
@@ -106,8 +107,16 @@ function runTests(): void {
   assert(buildFocusDoneMessage(60, 5, 'bn').body.includes('5 মিনিট'), 'BN focus message');
   assert(buildRestDoneMessage('en').title.includes('Rest Complete'), 'EN rest message');
   assert(buildRangeDoneMessage(120, 'en').body.includes('2h'), 'EN range message');
+  assert(
+    !buildIndividualDoneMessage(25, 'en').body.toLowerCase().includes('rest'),
+    'EN individual message has no rest'
+  );
+  assert(
+    !buildIndividualDoneMessage(25, 'bn').body.includes('রেস্ট'),
+    'BN individual message has no rest'
+  );
 
-  console.log('All 19 assertions passed!');
+  console.log('All 21 assertions passed!');
 }
 
 runTests();

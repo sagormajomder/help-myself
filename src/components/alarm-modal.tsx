@@ -5,6 +5,7 @@ import { ThemedText } from '@/components/themed-text';
 import { useTheme } from '@/hooks/use-theme';
 import {
   buildFocusDoneMessage,
+  buildIndividualDoneMessage,
   buildRangeDoneMessage,
   buildRestDoneMessage,
   type TranslationStrings,
@@ -45,6 +46,10 @@ export function AlarmModal({
     heading = t.today.alarmModal.rangeDoneTitle;
     body = buildRangeDoneMessage(alarm.cumulativeFocusMinutes, language).body;
     accent = '#0D9488';
+  } else if (alarm.type === 'individual_complete') {
+    heading = t.today.alarmModal.individualDoneTitle;
+    body = buildIndividualDoneMessage(alarm.cumulativeFocusMinutes, language).body;
+    accent = '#2563EB';
   } else if (alarm.type === 'rest_complete') {
     heading = t.today.alarmModal.restDoneTitle;
     body = buildRestDoneMessage(language).body;
@@ -97,13 +102,23 @@ export function AlarmModal({
                       {t.today.actions.snooze5}
                     </ThemedText>
                   </Pressable>
-                  <Pressable
-                    style={[styles.secondaryBtn, { backgroundColor: theme.backgroundElement }]}
-                    onPress={onSkipRest}>
-                    <ThemedText style={styles.secondaryBtnText}>
-                      {t.today.actions.skipRest}
-                    </ThemedText>
-                  </Pressable>
+                  {alarm.restMinutes > 0 ? (
+                    <Pressable
+                      style={[styles.secondaryBtn, { backgroundColor: theme.backgroundElement }]}
+                      onPress={onSkipRest}>
+                      <ThemedText style={styles.secondaryBtnText}>
+                        {t.today.actions.skipRest}
+                      </ThemedText>
+                    </Pressable>
+                  ) : (
+                    <Pressable
+                      style={[styles.secondaryBtn, { backgroundColor: '#2563EB' }]}
+                      onPress={onStartFocus}>
+                      <ThemedText style={[styles.secondaryBtnText, { color: '#FFFFFF' }]}>
+                        {t.today.actions.startFocus}
+                      </ThemedText>
+                    </Pressable>
+                  )}
                 </View>
               </>
             )}
@@ -118,7 +133,9 @@ export function AlarmModal({
               </Pressable>
             )}
 
-            {(autoContinue || alarm.type === 'range_complete') && (
+            {(autoContinue ||
+              alarm.type === 'range_complete' ||
+              alarm.type === 'individual_complete') && (
               <Pressable
                 style={[styles.primaryBtn, { backgroundColor: accent }]}
                 onPress={onDismiss}>

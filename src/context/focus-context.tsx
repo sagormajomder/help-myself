@@ -4,6 +4,7 @@ import { AppState, Platform } from 'react-native';
 
 import {
   buildFocusDoneMessage,
+  buildIndividualDoneMessage,
   buildRangeDoneMessage,
   buildRestDoneMessage,
   translations,
@@ -15,6 +16,7 @@ import {
   ensureNotificationPermissions,
   getNotificationPermissionStatus,
   NOTIFICATION_ACTION,
+  scheduleIndividualTimerAlarm,
   scheduleWindowAlarms,
   setupNotificationChannelsAndCategories,
 } from '@/services/notification-service';
@@ -25,19 +27,25 @@ import {
   DEFAULT_SETTINGS,
   initStorage,
   insertFocusSessionLog,
+  loadIndividualTimerState,
   loadProfiles,
   loadRuntimeState,
   loadSettings,
+  loadTimerMode,
+  saveIndividualTimerState,
   saveProfiles,
   saveRuntimeState,
   saveSettings,
+  saveTimerMode,
 } from '@/services/storage-service';
 import type {
   AlarmEvent,
   AppSettings,
   FocusProfile,
+  IndividualTimerState,
   RuntimeTimerState,
   TimelineSlot,
+  TimerMode,
   TimerPhase,
 } from '@/types/focus';
 import {
@@ -53,6 +61,8 @@ interface FocusContextValue {
   nowMs: number;
   settings: AppSettings;
   t: TranslationStrings;
+  timerMode: TimerMode;
+  individualTimer: IndividualTimerState;
   profiles: FocusProfile[];
   activeProfile: FocusProfile;
   slots: TimelineSlot[];
@@ -78,6 +88,9 @@ interface FocusContextValue {
   setExactAlarmGrantedState: (granted: boolean) => void;
   refreshPermissions: () => Promise<void>;
   updateSettings: (patch: Partial<AppSettings>) => Promise<void>;
+  setTimerMode: (mode: TimerMode) => Promise<void>;
+  setIndividualDuration: (minutes: number) => Promise<void>;
+  startIndividualTimer: (overrideMinutes?: number) => Promise<void>;
   saveProfile: (profile: FocusProfile, startImmediately?: boolean) => Promise<void>;
   setActiveProfileId: (id: string) => Promise<void>;
   deleteProfile: (id: string) => Promise<void>;
@@ -225,12 +238,62 @@ function buildStartedRuntime(params: {
   };
 }
 
+function buildDefaultIndividualTimer(
+  nowMs: number,
+  durationMinutes: number = 25
+): IndividualTimerState {
+  return {
+    durationMinutes: Math.max(1, Math.round(durationMinutes)),
+    status: 'idle',
+    startedAt: null,
+    endAt: null,
+    pausedAt: null,
+    dateKey: getLocalDateKey(nowMs),
+    completedFocusMinutesToday: 0,
+    completedCyclesToday: 0,
+  };
+}
+
+function normalizeIndividualForDate(
+  state: IndividualTimerState | null | undefined,
+  nowMs: number
+): IndividualTimerState {
+  if (!state) {
+    return buildDefaultIndividualTimer(nowMs);
+  }
+  const safeDuration =
+    Number.isFinite(state.durationMinutes) && state.durationMinutes >= 1
+      ? Math.round(state.durationMinutes)
+      : 25;
+  const todayKey = getLocalDateKey(nowMs);
+
+  if (state.status === 'running' || state.status === 'paused') {
+    return {
+      ...state,
+      durationMinutes: safeDuration,
+    };
+  }
+
+  if (state.dateKey !== todayKey) {
+    return buildDefaultIndividualTimer(nowMs, safeDuration);
+  }
+
+  return {
+    ...state,
+    durationMinutes: safeDuration,
+  };
+}
+
 export function FocusProvider({ children }: { children: React.ReactNode }) {
   const [ready, setReady] = useState(false);
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [profiles, setProfiles] = useState<FocusProfile[]>(DEFAULT_PROFILES);
   const [runtime, setRuntime] = useState<RuntimeTimerState | null>(null);
+  const [timerMode, setTimerModeState] = useState<TimerMode>('profile');
+  const [individualTimer, setIndividualTimer] = useState<IndividualTimerState>(() =>
+    buildDefaultIndividualTimer(Date.now())
+  );
   const [activeAlarm, setActiveAlarm] = useState<AlarmEvent | null>(null);
   const [statsRevision, setStatsRevision] = useState(0);
   const [settingsModalVisible, setSettingsModalVisible] = useState(false);
@@ -238,6 +301,7 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
   const [exactAlarmGranted, setExactAlarmGranted] = useState(true);
 
   const handledSlotsRef = useRef<Set<string>>(new Set());
+  const handledIndividualRef = useRef<Set<string>>(new Set());
 
   const activeProfile = useMemo(
     () => profiles.find((p) => p.isActive) ?? profiles[0] ?? DEFAULT_PROFILES[0],
@@ -290,10 +354,18 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
     let mounted = true;
     (async () => {
       await initStorage();
-      const [loadedSettings, loadedProfiles, loadedRuntime] = await Promise.all([
+      const [
+        loadedSettings,
+        loadedProfiles,
+        loadedRuntime,
+        loadedMode,
+        loadedIndividual,
+      ] = await Promise.all([
         loadSettings(),
         loadProfiles(),
         loadRuntimeState(),
+        loadTimerMode(),
+        loadIndividualTimerState(),
       ]);
       if (!mounted) return;
 
@@ -329,7 +401,47 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
         await saveRuntimeState(initialRuntime);
       }
 
+      let initialIndividual = normalizeIndividualForDate(loadedIndividual, now);
+      if (
+        initialIndividual.status === 'running' &&
+        initialIndividual.startedAt !== null &&
+        initialIndividual.endAt !== null &&
+        now >= initialIndividual.endAt
+      ) {
+        const sessionId = `individual:${initialIndividual.startedAt}:${initialIndividual.endAt}`;
+        handledIndividualRef.current.add(sessionId);
+        const todayKey = getLocalDateKey(now);
+        const baseMin =
+          initialIndividual.dateKey === todayKey
+            ? initialIndividual.completedFocusMinutesToday
+            : 0;
+        const baseCycles =
+          initialIndividual.dateKey === todayKey
+            ? initialIndividual.completedCyclesToday
+            : 0;
+        await insertFocusSessionLog({
+          id: sessionId,
+          dateKey: getLocalDateKey(initialIndividual.endAt),
+          profileId: 'individual-timer',
+          profileName: translations[loadedSettings.language].today.individualTimer.sessionName,
+          focusMinutes: initialIndividual.durationMinutes,
+          completedAt: initialIndividual.endAt,
+        });
+        initialIndividual = {
+          ...initialIndividual,
+          status: 'completed',
+          pausedAt: null,
+          dateKey: todayKey,
+          completedFocusMinutesToday: baseMin + initialIndividual.durationMinutes,
+          completedCyclesToday: baseCycles + 1,
+        };
+        setStatsRevision((v) => v + 1);
+      }
+      await saveIndividualTimerState(initialIndividual);
+
       if (!mounted) return;
+      setTimerModeState(loadedMode);
+      setIndividualTimer(initialIndividual);
       setRuntime(initialRuntime);
       setReady(true);
 
@@ -339,13 +451,26 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
         setExactAlarmGranted(permStatus.exactAlarmGranted);
       }
 
-      await syncNotifications(
-        currentActive,
-        winSlots,
-        loadedSettings,
-        initialRuntime.shiftOffsetMs,
-        isRuntimeHalted(initialRuntime)
-      );
+      if (loadedMode === 'individual') {
+        if (initialIndividual.status === 'running' && initialIndividual.endAt !== null) {
+          await scheduleIndividualTimerAlarm({
+            durationMinutes: initialIndividual.durationMinutes,
+            triggerAt: initialIndividual.endAt,
+            settings: loadedSettings,
+            nowMs: now,
+          });
+        } else {
+          await cancelAllScheduledAlarms();
+        }
+      } else {
+        await syncNotifications(
+          currentActive,
+          winSlots,
+          loadedSettings,
+          initialRuntime.shiftOffsetMs,
+          isRuntimeHalted(initialRuntime)
+        );
+      }
     })();
     return () => {
       mounted = false;
@@ -365,6 +490,14 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
         if (event.type === 'range_complete') {
           const bn = buildRangeDoneMessage(event.cumulativeFocusMinutes, 'bn');
           const en = buildRangeDoneMessage(event.cumulativeFocusMinutes, 'en');
+          await speakAnnouncement(
+            currentSettings.language === 'bn' ? bn.body : en.body,
+            currentSettings.language,
+            en.body
+          );
+        } else if (event.type === 'individual_complete') {
+          const bn = buildIndividualDoneMessage(event.cumulativeFocusMinutes, 'bn');
+          const en = buildIndividualDoneMessage(event.cumulativeFocusMinutes, 'en');
           await speakAnnouncement(
             currentSettings.language === 'bn' ? bn.body : en.body,
             currentSettings.language,
@@ -401,6 +534,8 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
   );
 
   const evalContextRef = useRef({
+    timerMode,
+    individualTimer,
     runtime,
     activeProfile,
     resolvedWindow,
@@ -411,6 +546,8 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     evalContextRef.current = {
+      timerMode,
+      individualTimer,
       runtime,
       activeProfile,
       resolvedWindow,
@@ -418,11 +555,22 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
       settings,
       windowKey,
     };
-  }, [runtime, activeProfile, resolvedWindow, slots, settings, windowKey]);
+  }, [
+    timerMode,
+    individualTimer,
+    runtime,
+    activeProfile,
+    resolvedWindow,
+    slots,
+    settings,
+    windowKey,
+  ]);
 
   const evaluateTick = useCallback(
     (tickNowMs: number) => {
       const {
+        timerMode: curMode,
+        individualTimer: curIndividual,
         runtime: curRuntime,
         activeProfile: curProfile,
         resolvedWindow: curWindow,
@@ -430,6 +578,73 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
         settings: curSettings,
         windowKey: curWindowKey,
       } = evalContextRef.current;
+
+      if (curMode === 'individual') {
+        const todayKey = getLocalDateKey(tickNowMs);
+        if (
+          curIndividual.status === 'running' &&
+          curIndividual.startedAt !== null &&
+          curIndividual.endAt !== null
+        ) {
+          if (tickNowMs >= curIndividual.endAt) {
+            const sessionId = `individual:${curIndividual.startedAt}:${curIndividual.endAt}`;
+            if (!handledIndividualRef.current.has(sessionId)) {
+              handledIndividualRef.current.add(sessionId);
+
+              const baseMin =
+                curIndividual.dateKey === todayKey
+                  ? curIndividual.completedFocusMinutesToday
+                  : 0;
+              const baseCycles =
+                curIndividual.dateKey === todayKey
+                  ? curIndividual.completedCyclesToday
+                  : 0;
+
+              void insertFocusSessionLog({
+                id: sessionId,
+                dateKey: getLocalDateKey(curIndividual.endAt),
+                profileId: 'individual-timer',
+                profileName: translations[curSettings.language].today.individualTimer.sessionName,
+                focusMinutes: curIndividual.durationMinutes,
+                completedAt: curIndividual.endAt,
+              }).then(() => setStatsRevision((v) => v + 1));
+
+              const nextIndividual: IndividualTimerState = {
+                ...curIndividual,
+                status: 'completed',
+                pausedAt: null,
+                dateKey: todayKey,
+                completedFocusMinutesToday: baseMin + curIndividual.durationMinutes,
+                completedCyclesToday: baseCycles + 1,
+              };
+              setIndividualTimer(nextIndividual);
+              void saveIndividualTimerState(nextIndividual);
+              void cancelAllScheduledAlarms();
+              void triggerAlarm(
+                {
+                  type: 'individual_complete',
+                  slotIndex: 0,
+                  cumulativeFocusMinutes: curIndividual.durationMinutes,
+                  restMinutes: 0,
+                  triggeredAt: tickNowMs,
+                },
+                curSettings
+              );
+            }
+          }
+          return;
+        }
+
+        if (
+          (curIndividual.status === 'idle' || curIndividual.status === 'completed') &&
+          curIndividual.dateKey !== todayKey
+        ) {
+          const rolled = buildDefaultIndividualTimer(tickNowMs, curIndividual.durationMinutes);
+          setIndividualTimer(rolled);
+          void saveIndividualTimerState(rolled);
+        }
+        return;
+      }
 
       if (!curRuntime || !curWindow) return;
 
@@ -610,6 +825,19 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
   }, [evaluateTick, ready, refreshPermissions]);
 
   const pauseTimer = useCallback(async () => {
+    if (timerMode === 'individual') {
+      if (individualTimer.status !== 'running') return;
+      const next: IndividualTimerState = {
+        ...individualTimer,
+        status: 'paused',
+        pausedAt: Date.now(),
+      };
+      setIndividualTimer(next);
+      await saveIndividualTimerState(next);
+      await cancelAllScheduledAlarms();
+      return;
+    }
+
     if (!runtime || runtime.pausedAt !== null) return;
     const next: RuntimeTimerState = {
       ...runtime,
@@ -619,9 +847,40 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
     setRuntime(next);
     await saveRuntimeState(next);
     await cancelAllScheduledAlarms();
-  }, [runtime]);
+  }, [individualTimer, runtime, timerMode]);
 
   const resumeTimer = useCallback(async () => {
+    if (timerMode === 'individual') {
+      if (
+        individualTimer.status !== 'paused' ||
+        individualTimer.pausedAt === null ||
+        individualTimer.startedAt === null ||
+        individualTimer.endAt === null
+      ) {
+        return;
+      }
+      const now = Date.now();
+      const delta = Math.max(0, now - individualTimer.pausedAt);
+      const nextStartedAt = individualTimer.startedAt + delta;
+      const nextEndAt = individualTimer.endAt + delta;
+      const next: IndividualTimerState = {
+        ...individualTimer,
+        status: 'running',
+        startedAt: nextStartedAt,
+        endAt: nextEndAt,
+        pausedAt: null,
+      };
+      setIndividualTimer(next);
+      await saveIndividualTimerState(next);
+      await scheduleIndividualTimerAlarm({
+        durationMinutes: next.durationMinutes,
+        triggerAt: nextEndAt,
+        settings,
+        nowMs: now,
+      });
+      return;
+    }
+
     if (!runtime || runtime.pausedAt === null) return;
     const now = Date.now();
     const delta = Math.max(0, now - runtime.pausedAt);
@@ -642,7 +901,7 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
     setRuntime(next);
     await saveRuntimeState(next);
     await syncNotifications(activeProfile, slots, settings, nextShift, false);
-  }, [activeProfile, runtime, settings, slots, syncNotifications]);
+  }, [activeProfile, individualTimer, runtime, settings, slots, syncNotifications, timerMode]);
 
   const startRestFromAck = useCallback(async () => {
     stopAlarmSound();
@@ -821,6 +1080,20 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
     setActiveAlarm(null);
     handledSlotsRef.current.clear();
 
+    if (timerMode === 'individual') {
+      const next: IndividualTimerState = {
+        ...normalizeIndividualForDate(individualTimer, Date.now()),
+        status: 'idle',
+        startedAt: null,
+        endAt: null,
+        pausedAt: null,
+      };
+      setIndividualTimer(next);
+      await saveIndividualTimerState(next);
+      await cancelAllScheduledAlarms();
+      return;
+    }
+
     const next = buildInactiveRuntime(
       activeProfile.id,
       windowKey,
@@ -830,7 +1103,7 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
     setRuntime(next);
     await saveRuntimeState(next);
     await cancelAllScheduledAlarms();
-  }, [activeProfile.id, runtime, windowKey]);
+  }, [activeProfile.id, individualTimer, runtime, timerMode, windowKey]);
 
   const resetDay = useCallback(async () => {
     stopAlarmSound();
@@ -838,11 +1111,19 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
     setActiveAlarm(null);
     handledSlotsRef.current.clear();
 
+    if (timerMode === 'individual') {
+      const next = buildDefaultIndividualTimer(Date.now(), individualTimer.durationMinutes);
+      setIndividualTimer(next);
+      await saveIndividualTimerState(next);
+      await cancelAllScheduledAlarms();
+      return;
+    }
+
     const next = buildInactiveRuntime(activeProfile.id, windowKey, 0, 0);
     setRuntime(next);
     await saveRuntimeState(next);
     await cancelAllScheduledAlarms();
-  }, [activeProfile.id, windowKey]);
+  }, [activeProfile.id, individualTimer.durationMinutes, timerMode, windowKey]);
 
   // Listen for notification action buttons
   useEffect(() => {
@@ -909,12 +1190,146 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
     [runtime, syncNotifications]
   );
 
+  const setTimerMode = useCallback(
+    async (mode: TimerMode) => {
+      if (mode === timerMode) return;
+      stopAlarmSound();
+      await stopSpeech();
+      setActiveAlarm(null);
+      handledSlotsRef.current.clear();
+
+      const now = Date.now();
+      if (mode === 'individual') {
+        if (!isRuntimeHalted(runtime) || runtime?.phase === 'paused' || runtime?.pendingAckType !== null) {
+          const inactive = buildInactiveRuntime(
+            activeProfile.id,
+            windowKey,
+            runtime?.windowKey === windowKey ? runtime.completedFocusMinutesToday : 0,
+            runtime?.windowKey === windowKey ? runtime.completedCyclesToday : 0
+          );
+          setRuntime(inactive);
+          await saveRuntimeState(inactive);
+        }
+        const normalized = normalizeIndividualForDate(individualTimer, now);
+        setIndividualTimer(normalized);
+        await saveIndividualTimerState(normalized);
+        await cancelAllScheduledAlarms();
+        setTimerModeState('individual');
+        await saveTimerMode('individual');
+        return;
+      }
+
+      if (
+        individualTimer.status === 'running' ||
+        individualTimer.status === 'paused' ||
+        individualTimer.status === 'completed'
+      ) {
+        const resetInd: IndividualTimerState = {
+          ...normalizeIndividualForDate(individualTimer, now),
+          status: 'idle',
+          startedAt: null,
+          endAt: null,
+          pausedAt: null,
+        };
+        setIndividualTimer(resetInd);
+        await saveIndividualTimerState(resetInd);
+      }
+      await cancelAllScheduledAlarms();
+      setTimerModeState('profile');
+      await saveTimerMode('profile');
+    },
+    [activeProfile.id, individualTimer, runtime, timerMode, windowKey]
+  );
+
+  const setIndividualDuration = useCallback(
+    async (minutes: number) => {
+      if (individualTimer.status === 'running' || individualTimer.status === 'paused') {
+        return;
+      }
+      const clamped = Math.max(1, Math.min(720, Math.round(minutes)));
+      const normalized = normalizeIndividualForDate(individualTimer, Date.now());
+      const next: IndividualTimerState = {
+        ...normalized,
+        durationMinutes: clamped,
+        status: 'idle',
+        startedAt: null,
+        endAt: null,
+        pausedAt: null,
+      };
+      setIndividualTimer(next);
+      await saveIndividualTimerState(next);
+    },
+    [individualTimer]
+  );
+
+  const startIndividualTimer = useCallback(
+    async (overrideMinutes?: number) => {
+      stopAlarmSound();
+      await stopSpeech();
+      setActiveAlarm(null);
+      handledSlotsRef.current.clear();
+
+      const now = Date.now();
+      const mins =
+        overrideMinutes !== undefined
+          ? Math.max(1, Math.min(720, Math.round(overrideMinutes)))
+          : individualTimer.durationMinutes;
+      const endAt = now + mins * 60_000;
+
+      if (timerMode !== 'individual') {
+        if (!isRuntimeHalted(runtime) || runtime?.phase === 'paused' || runtime?.pendingAckType !== null) {
+          const inactive = buildInactiveRuntime(
+            activeProfile.id,
+            windowKey,
+            runtime?.windowKey === windowKey ? runtime.completedFocusMinutesToday : 0,
+            runtime?.windowKey === windowKey ? runtime.completedCyclesToday : 0
+          );
+          setRuntime(inactive);
+          await saveRuntimeState(inactive);
+        }
+        setTimerModeState('individual');
+        await saveTimerMode('individual');
+      }
+
+      const normalized = normalizeIndividualForDate(individualTimer, now);
+      const next: IndividualTimerState = {
+        ...normalized,
+        durationMinutes: mins,
+        status: 'running',
+        startedAt: now,
+        endAt,
+        pausedAt: null,
+      };
+      setIndividualTimer(next);
+      await saveIndividualTimerState(next);
+      await scheduleIndividualTimerAlarm({
+        durationMinutes: mins,
+        triggerAt: endAt,
+        settings,
+        nowMs: now,
+      });
+    },
+    [activeProfile.id, individualTimer, runtime, settings, timerMode, windowKey]
+  );
+
   const updateSettings = useCallback(
     async (patch: Partial<AppSettings>) => {
       const next = { ...settings, ...patch };
       setSettings(next);
       await saveSettings(next);
       await setupNotificationChannelsAndCategories(next.language);
+      if (timerMode === 'individual') {
+        if (individualTimer.status === 'running' && individualTimer.endAt !== null) {
+          await scheduleIndividualTimerAlarm({
+            durationMinutes: individualTimer.durationMinutes,
+            triggerAt: individualTimer.endAt,
+            settings: next,
+          });
+        } else {
+          await cancelAllScheduledAlarms();
+        }
+        return;
+      }
       await syncNotifications(
         activeProfile,
         slots,
@@ -923,7 +1338,7 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
         isRuntimeHalted(runtime)
       );
     },
-    [activeProfile, runtime, settings, slots, syncNotifications]
+    [activeProfile, individualTimer, runtime, settings, slots, syncNotifications, timerMode]
   );
 
   const saveProfile = useCallback(
@@ -937,9 +1352,22 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
       }
       setProfiles(next);
       await saveProfiles(next);
+      if (timerMode === 'individual') {
+        const resetInd: IndividualTimerState = {
+          ...normalizeIndividualForDate(individualTimer, Date.now()),
+          status: 'idle',
+          startedAt: null,
+          endAt: null,
+          pausedAt: null,
+        };
+        setIndividualTimer(resetInd);
+        await saveIndividualTimerState(resetInd);
+        setTimerModeState('profile');
+        await saveTimerMode('profile');
+      }
       await applyNewProfilesAndResync(next, settings, startImmediately);
     },
-    [applyNewProfilesAndResync, profiles, settings]
+    [applyNewProfilesAndResync, individualTimer, profiles, settings, timerMode]
   );
 
   const setActiveProfileId = useCallback(
@@ -947,9 +1375,22 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
       const next = profiles.map((p) => ({ ...p, isActive: p.id === id }));
       setProfiles(next);
       await saveProfiles(next);
+      if (timerMode === 'individual') {
+        const resetInd: IndividualTimerState = {
+          ...normalizeIndividualForDate(individualTimer, Date.now()),
+          status: 'idle',
+          startedAt: null,
+          endAt: null,
+          pausedAt: null,
+        };
+        setIndividualTimer(resetInd);
+        await saveIndividualTimerState(resetInd);
+        setTimerModeState('profile');
+        await saveTimerMode('profile');
+      }
       await applyNewProfilesAndResync(next, settings);
     },
-    [applyNewProfilesAndResync, profiles, settings]
+    [applyNewProfilesAndResync, individualTimer, profiles, settings, timerMode]
   );
 
   const deleteProfile = useCallback(
@@ -974,6 +1415,20 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const testAlarm = useCallback(async () => {
+    if (timerMode === 'individual') {
+      await triggerAlarm(
+        {
+          type: 'individual_complete',
+          slotIndex: 0,
+          cumulativeFocusMinutes: individualTimer.durationMinutes,
+          restMinutes: 0,
+          triggeredAt: Date.now(),
+        },
+        settings
+      );
+      return;
+    }
+
     const sampleCumulative =
       (runtime?.completedFocusMinutesToday ?? 0) + activeProfile.focusMinutes;
     await triggerAlarm(
@@ -986,7 +1441,15 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
       },
       settings
     );
-  }, [activeProfile.focusMinutes, activeProfile.restMinutes, runtime, settings, triggerAlarm]);
+  }, [
+    activeProfile.focusMinutes,
+    activeProfile.restMinutes,
+    individualTimer.durationMinutes,
+    runtime,
+    settings,
+    timerMode,
+    triggerAlarm,
+  ]);
 
   const bumpStatsRevision = useCallback(() => {
     setStatsRevision((v) => v + 1);
@@ -1006,14 +1469,48 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
     (!notificationsGranted || (Platform.OS === 'android' && !exactAlarmGranted));
 
   const shift = runtime?.shiftOffsetMs ?? 0;
-  const currentSlot = runtime ? (slots[runtime.currentSlotIndex] ?? null) : null;
-  const phase: TimerPhase = runtime?.phase ?? 'inactive';
+  const currentSlot =
+    timerMode === 'profile' && runtime ? (slots[runtime.currentSlotIndex] ?? null) : null;
 
+  let phase: TimerPhase = runtime?.phase ?? 'inactive';
   let remainingMs = 0;
   let progress = 0;
   let nextAlarmAt: number | null = null;
 
-  if (currentSlot && (phase === 'focusing' || phase === 'resting' || phase === 'paused')) {
+  if (timerMode === 'individual') {
+    if (
+      individualTimer.status === 'running' &&
+      individualTimer.startedAt !== null &&
+      individualTimer.endAt !== null
+    ) {
+      phase = 'focusing';
+      const total = Math.max(1, individualTimer.endAt - individualTimer.startedAt);
+      remainingMs = Math.max(0, individualTimer.endAt - nowMs);
+      progress = Math.min(1, Math.max(0, (nowMs - individualTimer.startedAt) / total));
+      nextAlarmAt = individualTimer.endAt;
+    } else if (
+      individualTimer.status === 'paused' &&
+      individualTimer.startedAt !== null &&
+      individualTimer.endAt !== null &&
+      individualTimer.pausedAt !== null
+    ) {
+      phase = 'paused';
+      const total = Math.max(1, individualTimer.endAt - individualTimer.startedAt);
+      remainingMs = Math.max(0, individualTimer.endAt - individualTimer.pausedAt);
+      progress = Math.min(
+        1,
+        Math.max(0, (individualTimer.pausedAt - individualTimer.startedAt) / total)
+      );
+    } else if (individualTimer.status === 'completed') {
+      phase = 'completed_range';
+      remainingMs = 0;
+      progress = 1;
+    } else {
+      phase = 'inactive';
+      remainingMs = Math.max(1, individualTimer.durationMinutes) * 60_000;
+      progress = 0;
+    }
+  } else if (currentSlot && (phase === 'focusing' || phase === 'resting' || phase === 'paused')) {
     const refNow = runtime?.pausedAt ?? nowMs;
     const startAt = currentSlot.startAt + shift;
     const endAt = currentSlot.endAt + shift;
@@ -1029,11 +1526,27 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
     remainingMs = Math.max(1, activeProfile.focusMinutes) * 60_000;
   }
 
+  const todayKey = getLocalDateKey(nowMs);
+  const todayFocusMinutes =
+    timerMode === 'individual'
+      ? individualTimer.dateKey === todayKey
+        ? individualTimer.completedFocusMinutesToday
+        : 0
+      : (runtime?.completedFocusMinutesToday ?? 0);
+  const completedCyclesToday =
+    timerMode === 'individual'
+      ? individualTimer.dateKey === todayKey
+        ? individualTimer.completedCyclesToday
+        : 0
+      : (runtime?.completedCyclesToday ?? 0);
+
   const value: FocusContextValue = {
     ready,
     nowMs,
     settings,
     t: translations[settings.language],
+    timerMode,
+    individualTimer,
     profiles,
     activeProfile,
     slots,
@@ -1044,8 +1557,8 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
     currentSlot,
     remainingMs,
     progress,
-    todayFocusMinutes: runtime?.completedFocusMinutesToday ?? 0,
-    completedCyclesToday: runtime?.completedCyclesToday ?? 0,
+    todayFocusMinutes,
+    completedCyclesToday,
     nextAlarmAt,
     activeAlarm,
     statsRevision,
@@ -1059,6 +1572,9 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
     setExactAlarmGrantedState: setExactAlarmGranted,
     refreshPermissions,
     updateSettings,
+    setTimerMode,
+    setIndividualDuration,
+    startIndividualTimer,
     saveProfile,
     setActiveProfileId,
     deleteProfile,

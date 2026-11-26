@@ -1,11 +1,13 @@
 import { router } from 'expo-router';
-import React from 'react';
+import React, { useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Platform,
   Pressable,
   ScrollView,
   StyleSheet,
+  TextInput,
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -25,6 +27,8 @@ import {
   formatMinuteOfDay,
 } from '@/utils/schedule-calculator';
 
+const INDIVIDUAL_PRESETS = [5, 10, 15, 25, 30, 45, 60];
+
 export default function TodayScreen() {
   const safeInsets = useSafeAreaInsets();
   const theme = useTheme();
@@ -33,6 +37,8 @@ export default function TodayScreen() {
     nowMs,
     settings,
     t,
+    timerMode,
+    individualTimer,
     profiles,
     activeProfile,
     slots,
@@ -46,6 +52,9 @@ export default function TodayScreen() {
     completedCyclesToday,
     nextAlarmAt,
     activeAlarm,
+    setTimerMode,
+    setIndividualDuration,
+    startIndividualTimer,
     setActiveProfileId,
     startFocus,
     stopFocus,
@@ -60,6 +69,9 @@ export default function TodayScreen() {
     testAlarm,
   } = useFocus();
 
+  const [durationDraft, setDurationDraft] = useState<string | null>(null);
+  const durationText = durationDraft ?? String(individualTimer.durationMinutes);
+
   if (!ready) {
     return (
       <ThemedView style={styles.loadingWrap}>
@@ -71,8 +83,40 @@ export default function TodayScreen() {
   const topPadding = Platform.OS === 'web' ? Spacing.six + 24 : safeInsets.top + Spacing.two;
   const bottomPadding = safeInsets.bottom + BottomTabInset + Spacing.four;
 
+  const handleDurationTextChange = (text: string) => {
+    const digitsOnly = text.replace(/[^0-9]/g, '');
+    setDurationDraft(digitsOnly);
+    const parsed = Number.parseInt(digitsOnly, 10);
+    if (Number.isFinite(parsed) && parsed >= 1 && parsed <= 720) {
+      void setIndividualDuration(parsed);
+    }
+  };
+
+  const handleStartIndividual = () => {
+    const parsed = Number.parseInt(durationText, 10);
+    if (!Number.isFinite(parsed) || parsed < 1 || parsed > 720) {
+      Alert.alert(t.appName, t.today.individualTimer.invalidDuration);
+      return;
+    }
+    setDurationDraft(null);
+    void startIndividualTimer(parsed);
+  };
+
+  let phaseLabel = t.phases[phase];
   let subtitleLabel = '';
-  if (phase === 'inactive') {
+
+  if (timerMode === 'individual') {
+    if (phase === 'completed_range') {
+      phaseLabel = t.today.individualTimer.completedPhase;
+      subtitleLabel = t.today.individualTimer.completedSubtitle;
+    } else if (phase === 'inactive') {
+      subtitleLabel = t.today.individualTimer.readySubtitle;
+    } else if (nextAlarmAt) {
+      subtitleLabel = `${t.today.nextAlarmAt}: ${formatClockTime(nextAlarmAt)}`;
+    } else {
+      subtitleLabel = t.phases[phase];
+    }
+  } else if (phase === 'inactive') {
     if (!isActiveDay) {
       subtitleLabel = t.today.noActiveDay;
     } else if (findSlotAtTime(slots, nowMs, 0)) {
@@ -92,6 +136,22 @@ export default function TodayScreen() {
     subtitleLabel = t.phases[phase];
   }
 
+  const parsedIndividualMinutes = Number.parseInt(durationText, 10);
+  const previewMinutes =
+    Number.isFinite(parsedIndividualMinutes) && parsedIndividualMinutes >= 1
+      ? parsedIndividualMinutes
+      : individualTimer.durationMinutes;
+  const previewStartAt =
+    individualTimer.status === 'running' && individualTimer.startedAt
+      ? individualTimer.startedAt
+      : nowMs;
+  const previewEndAt =
+    individualTimer.status === 'running' && individualTimer.endAt
+      ? individualTimer.endAt
+      : individualTimer.status === 'paused'
+        ? nowMs + remainingMs
+        : nowMs + previewMinutes * 60_000;
+
   return (
     <ThemedView style={styles.root}>
       <ScrollView
@@ -103,11 +163,12 @@ export default function TodayScreen() {
         <View style={styles.inner}>
           {/* Header & Profile Switcher */}
           <View style={styles.headerRow}>
-            <View>
+            <View style={styles.headerTextWrap}>
               <ThemedText type="subtitle">{t.appName}</ThemedText>
               <ThemedText type="small" themeColor="textSecondary">
-                {t.today.timeRange}: {formatMinuteOfDay(activeProfile.startMinuteOfDay)} –{' '}
-                {formatMinuteOfDay(activeProfile.endMinuteOfDay)}
+                {timerMode === 'individual'
+                  ? t.today.individualTimer.headerSubtitle
+                  : `${t.today.timeRange}: ${formatMinuteOfDay(activeProfile.startMinuteOfDay)} – ${formatMinuteOfDay(activeProfile.endMinuteOfDay)}`}
               </ThemedText>
             </View>
             <View style={styles.headerActions}>
@@ -124,8 +185,25 @@ export default function TodayScreen() {
             horizontal
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={styles.profileChipsRow}>
+            <Pressable
+              onPress={() => void setTimerMode('individual')}
+              style={[
+                styles.profileChip,
+                {
+                  backgroundColor:
+                    timerMode === 'individual' ? '#2563EB' : theme.backgroundElement,
+                },
+              ]}>
+              <ThemedText
+                style={[
+                  styles.profileChipText,
+                  { color: timerMode === 'individual' ? '#FFFFFF' : theme.text },
+                ]}>
+                ⏱ {t.today.individualTimer.chipLabel}
+              </ThemedText>
+            </Pressable>
             {profiles.map((profile) => {
-              const selected = profile.id === activeProfile.id;
+              const selected = timerMode === 'profile' && profile.id === activeProfile.id;
               return (
                 <Pressable
                   key={profile.id}
@@ -153,7 +231,7 @@ export default function TodayScreen() {
             remainingMs={remainingMs}
             progress={progress}
             phase={phase}
-            phaseLabel={t.phases[phase]}
+            phaseLabel={phaseLabel}
             subtitleLabel={subtitleLabel}
           />
 
@@ -178,23 +256,194 @@ export default function TodayScreen() {
             </View>
           </View>
 
+          {/* Individual Timer Duration Setup (no profile needed, no rest option) */}
+          {timerMode === 'individual' &&
+            (phase === 'inactive' || phase === 'completed_range') && (
+              <View style={[styles.quickCard, { backgroundColor: theme.backgroundElement }]}>
+                <ThemedText type="smallBold">{t.today.individualTimer.durationTitle}</ThemedText>
+                <View style={styles.presetsRow}>
+                  {INDIVIDUAL_PRESETS.map((mins) => {
+                    const selected = durationText === String(mins);
+                    return (
+                      <Pressable
+                        key={mins}
+                        onPress={() => {
+                          setDurationDraft(null);
+                          void setIndividualDuration(mins);
+                        }}
+                        style={[
+                          styles.presetChip,
+                          {
+                            backgroundColor: selected ? '#2563EB' : theme.backgroundSelected,
+                          },
+                        ]}>
+                        <ThemedText
+                          style={[
+                            styles.presetChipText,
+                            { color: selected ? '#FFFFFF' : theme.text },
+                          ]}>
+                          {mins} {t.schedule.minutesUnit}
+                        </ThemedText>
+                      </Pressable>
+                    );
+                  })}
+                  <TextInput
+                    value={durationText}
+                    onChangeText={handleDurationTextChange}
+                    keyboardType="number-pad"
+                    maxLength={3}
+                    placeholder={t.schedule.customMinutes}
+                    placeholderTextColor={theme.textSecondary}
+                    style={[
+                      styles.durationInput,
+                      { color: theme.text, backgroundColor: theme.background },
+                    ]}
+                  />
+                </View>
+                <ThemedText type="small" themeColor="textSecondary">
+                  {t.today.individualTimer.noRestHint}
+                </ThemedText>
+              </View>
+            )}
+
           {/* Primary Controls */}
-          <View style={styles.controlsWrap}>
-            {phase === 'inactive' && (
-              <>
-                <Pressable
-                  style={[styles.primaryBtn, { backgroundColor: '#2563EB' }]}
-                  onPress={() => void startFocus()}>
-                  <ThemedText style={styles.primaryBtnText}>
-                    {t.today.actions.startFocus}
-                  </ThemedText>
-                </Pressable>
+          {timerMode === 'individual' ? (
+            <View style={styles.controlsWrap}>
+              {(phase === 'inactive' || phase === 'completed_range') && (
+                <>
+                  <Pressable
+                    style={[styles.primaryBtn, { backgroundColor: '#2563EB' }]}
+                    onPress={handleStartIndividual}>
+                    <ThemedText style={styles.primaryBtnText}>
+                      {t.today.individualTimer.startButton}
+                    </ThemedText>
+                  </Pressable>
+                  <View style={styles.controlRow}>
+                    <Pressable
+                      style={[styles.secondaryBtn, { backgroundColor: theme.backgroundElement }]}
+                      onPress={() => void testAlarm()}>
+                      <ThemedText style={styles.secondaryBtnText}>
+                        {t.today.actions.testAlarm}
+                      </ThemedText>
+                    </Pressable>
+                    {(todayFocusMinutes > 0 || completedCyclesToday > 0) && (
+                      <Pressable
+                        style={[styles.secondaryBtn, { backgroundColor: theme.backgroundElement }]}
+                        onPress={() => void resetDay()}>
+                        <ThemedText style={styles.secondaryBtnText}>
+                          {t.today.actions.resetDay}
+                        </ThemedText>
+                      </Pressable>
+                    )}
+                  </View>
+                </>
+              )}
+
+              {phase === 'focusing' && (
                 <View style={styles.controlRow}>
                   <Pressable
+                    style={[styles.primaryBtn, { backgroundColor: '#D97706' }]}
+                    onPress={() => void pauseTimer()}>
+                    <ThemedText style={styles.primaryBtnText}>
+                      {t.today.actions.pause}
+                    </ThemedText>
+                  </Pressable>
+                </View>
+              )}
+
+              {phase === 'paused' && (
+                <View style={styles.controlRow}>
+                  <Pressable
+                    style={[styles.primaryBtn, { backgroundColor: '#2563EB' }]}
+                    onPress={() => void resumeTimer()}>
+                    <ThemedText style={styles.primaryBtnText}>
+                      {t.today.actions.resume}
+                    </ThemedText>
+                  </Pressable>
+                  <Pressable
+                    style={[styles.secondaryBtn, { backgroundColor: '#DC262622' }]}
+                    onPress={() => void stopFocus()}>
+                    <ThemedText style={[styles.secondaryBtnText, { color: '#DC2626' }]}>
+                      {t.today.individualTimer.stopButton}
+                    </ThemedText>
+                  </Pressable>
+                </View>
+              )}
+
+              {(phase === 'focusing' || phase === 'paused') && (
+                <View style={styles.controlRow}>
+                  {phase !== 'paused' && (
+                    <Pressable
+                      style={[styles.secondaryBtn, { backgroundColor: '#DC262622' }]}
+                      onPress={() => void stopFocus()}>
+                      <ThemedText style={[styles.secondaryBtnText, { color: '#DC2626' }]}>
+                        {t.today.individualTimer.stopButton}
+                      </ThemedText>
+                    </Pressable>
+                  )}
+                  <Pressable
                     style={[styles.secondaryBtn, { backgroundColor: theme.backgroundElement }]}
-                    onPress={() => router.push('/schedule')}>
+                    onPress={() => void testAlarm()}>
                     <ThemedText style={styles.secondaryBtnText}>
-                      {t.today.actions.createCustom}
+                      {t.today.actions.testAlarm}
+                    </ThemedText>
+                  </Pressable>
+                  <Pressable
+                    style={[styles.secondaryBtn, { backgroundColor: theme.backgroundElement }]}
+                    onPress={() => void resetDay()}>
+                    <ThemedText style={styles.secondaryBtnText}>
+                      {t.today.actions.resetDay}
+                    </ThemedText>
+                  </Pressable>
+                </View>
+              )}
+            </View>
+          ) : (
+            <View style={styles.controlsWrap}>
+              {phase === 'inactive' && (
+                <>
+                  <Pressable
+                    style={[styles.primaryBtn, { backgroundColor: '#2563EB' }]}
+                    onPress={() => void startFocus()}>
+                    <ThemedText style={styles.primaryBtnText}>
+                      {t.today.actions.startFocus}
+                    </ThemedText>
+                  </Pressable>
+                  <View style={styles.controlRow}>
+                    <Pressable
+                      style={[styles.secondaryBtn, { backgroundColor: theme.backgroundElement }]}
+                      onPress={() => router.push('/schedule')}>
+                      <ThemedText style={styles.secondaryBtnText}>
+                        {t.today.actions.createCustom}
+                      </ThemedText>
+                    </Pressable>
+                    <Pressable
+                      style={[styles.secondaryBtn, { backgroundColor: theme.backgroundElement }]}
+                      onPress={() => void testAlarm()}>
+                      <ThemedText style={styles.secondaryBtnText}>
+                        {t.today.actions.testAlarm}
+                      </ThemedText>
+                    </Pressable>
+                    {(todayFocusMinutes > 0 || completedCyclesToday > 0) && (
+                      <Pressable
+                        style={[styles.secondaryBtn, { backgroundColor: theme.backgroundElement }]}
+                        onPress={() => void resetDay()}>
+                        <ThemedText style={styles.secondaryBtnText}>
+                          {t.today.actions.resetDay}
+                        </ThemedText>
+                      </Pressable>
+                    )}
+                  </View>
+                </>
+              )}
+
+              {phase === 'outside_range' && (
+                <View style={styles.controlRow}>
+                  <Pressable
+                    style={[styles.secondaryBtn, { backgroundColor: '#DC262622' }]}
+                    onPress={() => void stopFocus()}>
+                    <ThemedText style={[styles.secondaryBtnText, { color: '#DC2626' }]}>
+                      {t.today.actions.stopFocus}
                     </ThemedText>
                   </Pressable>
                   <Pressable
@@ -204,121 +453,39 @@ export default function TodayScreen() {
                       {t.today.actions.testAlarm}
                     </ThemedText>
                   </Pressable>
-                  {(todayFocusMinutes > 0 || completedCyclesToday > 0) && (
+                </View>
+              )}
+
+              {(phase === 'focusing' || phase === 'resting') && (
+                <View style={styles.controlRow}>
+                  <Pressable
+                    style={[styles.primaryBtn, { backgroundColor: '#D97706' }]}
+                    onPress={() => void pauseTimer()}>
+                    <ThemedText style={styles.primaryBtnText}>
+                      {t.today.actions.pause}
+                    </ThemedText>
+                  </Pressable>
+                  {phase === 'resting' && (
                     <Pressable
                       style={[styles.secondaryBtn, { backgroundColor: theme.backgroundElement }]}
-                      onPress={() => void resetDay()}>
+                      onPress={() => void skipRest()}>
                       <ThemedText style={styles.secondaryBtnText}>
-                        {t.today.actions.resetDay}
+                        {t.today.actions.skipRest}
                       </ThemedText>
                     </Pressable>
                   )}
                 </View>
-              </>
-            )}
+              )}
 
-            {phase === 'outside_range' && (
-              <View style={styles.controlRow}>
-                <Pressable
-                  style={[styles.secondaryBtn, { backgroundColor: '#DC262622' }]}
-                  onPress={() => void stopFocus()}>
-                  <ThemedText style={[styles.secondaryBtnText, { color: '#DC2626' }]}>
-                    {t.today.actions.stopFocus}
-                  </ThemedText>
-                </Pressable>
-                <Pressable
-                  style={[styles.secondaryBtn, { backgroundColor: theme.backgroundElement }]}
-                  onPress={() => void testAlarm()}>
-                  <ThemedText style={styles.secondaryBtnText}>
-                    {t.today.actions.testAlarm}
-                  </ThemedText>
-                </Pressable>
-              </View>
-            )}
-
-            {(phase === 'focusing' || phase === 'resting') && (
-              <View style={styles.controlRow}>
-                <Pressable
-                  style={[styles.primaryBtn, { backgroundColor: '#D97706' }]}
-                  onPress={() => void pauseTimer()}>
-                  <ThemedText style={styles.primaryBtnText}>
-                    {t.today.actions.pause}
-                  </ThemedText>
-                </Pressable>
-                {phase === 'resting' && (
-                  <Pressable
-                    style={[styles.secondaryBtn, { backgroundColor: theme.backgroundElement }]}
-                    onPress={() => void skipRest()}>
-                    <ThemedText style={styles.secondaryBtnText}>
-                      {t.today.actions.skipRest}
-                    </ThemedText>
-                  </Pressable>
-                )}
-              </View>
-            )}
-
-            {phase === 'paused' && (
-              <View style={styles.controlRow}>
-                <Pressable
-                  style={[styles.primaryBtn, { backgroundColor: '#2563EB' }]}
-                  onPress={() => void resumeTimer()}>
-                  <ThemedText style={styles.primaryBtnText}>
-                    {t.today.actions.resume}
-                  </ThemedText>
-                </Pressable>
-                <Pressable
-                  style={[styles.secondaryBtn, { backgroundColor: '#DC262622' }]}
-                  onPress={() => void stopFocus()}>
-                  <ThemedText style={[styles.secondaryBtnText, { color: '#DC2626' }]}>
-                    {t.today.actions.stopFocus}
-                  </ThemedText>
-                </Pressable>
-              </View>
-            )}
-
-            {phase === 'awaiting_rest_ack' && (
-              <View style={styles.controlColumn}>
-                {activeProfile.restMinutes > 0 && (
-                  <Pressable
-                    style={[styles.primaryBtn, { backgroundColor: '#059669' }]}
-                    onPress={() => void startRestFromAck()}>
-                    <ThemedText style={styles.primaryBtnText}>
-                      {t.today.actions.startRest}
-                    </ThemedText>
-                  </Pressable>
-                )}
+              {phase === 'paused' && (
                 <View style={styles.controlRow}>
                   <Pressable
-                    style={[styles.secondaryBtn, { backgroundColor: theme.backgroundElement }]}
-                    onPress={() => void snooze5Min()}>
-                    <ThemedText style={styles.secondaryBtnText}>
-                      {t.today.actions.snooze5}
+                    style={[styles.primaryBtn, { backgroundColor: '#2563EB' }]}
+                    onPress={() => void resumeTimer()}>
+                    <ThemedText style={styles.primaryBtnText}>
+                      {t.today.actions.resume}
                     </ThemedText>
                   </Pressable>
-                  <Pressable
-                    style={[styles.secondaryBtn, { backgroundColor: theme.backgroundElement }]}
-                    onPress={() => void skipRest()}>
-                    <ThemedText style={styles.secondaryBtnText}>
-                      {t.today.actions.skipRest}
-                    </ThemedText>
-                  </Pressable>
-                </View>
-              </View>
-            )}
-
-            {phase === 'awaiting_focus_ack' && (
-              <Pressable
-                style={[styles.primaryBtn, { backgroundColor: '#2563EB' }]}
-                onPress={() => void startFocusFromAck()}>
-                <ThemedText style={styles.primaryBtnText}>
-                  {t.today.actions.startFocus}
-                </ThemedText>
-              </Pressable>
-            )}
-
-            {phase !== 'inactive' && phase !== 'outside_range' && (
-              <View style={styles.controlRow}>
-                {phase !== 'paused' && phase !== 'completed_range' && (
                   <Pressable
                     style={[styles.secondaryBtn, { backgroundColor: '#DC262622' }]}
                     onPress={() => void stopFocus()}>
@@ -326,68 +493,153 @@ export default function TodayScreen() {
                       {t.today.actions.stopFocus}
                     </ThemedText>
                   </Pressable>
-                )}
-                <Pressable
-                  style={[styles.secondaryBtn, { backgroundColor: theme.backgroundElement }]}
-                  onPress={() => void testAlarm()}>
-                  <ThemedText style={styles.secondaryBtnText}>
-                    {t.today.actions.testAlarm}
-                  </ThemedText>
-                </Pressable>
-                <Pressable
-                  style={[styles.secondaryBtn, { backgroundColor: theme.backgroundElement }]}
-                  onPress={() => void resetDay()}>
-                  <ThemedText style={styles.secondaryBtnText}>
-                    {t.today.actions.resetDay}
-                  </ThemedText>
-                </Pressable>
-              </View>
-            )}
-          </View>
+                </View>
+              )}
 
-          {/* Today's Timeline */}
-          <View style={styles.timelineSection}>
-            <ThemedText type="smallBold">{t.today.timelineTitle}</ThemedText>
-            <View style={styles.timelineList}>
-              {slots.slice(0, 24).map((slot) => {
-                const isCurrent =
-                  currentSlot?.index === slot.index &&
-                  phase !== 'outside_range' &&
-                  phase !== 'inactive' &&
-                  phase !== 'completed_range';
-                const isFocus = slot.type === 'focus';
-                const accent = isFocus ? '#2563EB' : '#059669';
-                return (
-                  <View
-                    key={slot.index}
-                    style={[
-                      styles.slotRow,
-                      {
-                        backgroundColor: theme.backgroundElement,
-                        borderColor: isCurrent ? accent : 'transparent',
-                        borderWidth: isCurrent ? 2 : 0,
-                      },
-                    ]}>
-                    <View style={[styles.slotDot, { backgroundColor: accent }]} />
-                    <View style={styles.slotInfo}>
-                      <ThemedText type="smallBold">
-                        {isFocus ? t.today.focusLabel : t.today.restLabel} ({slot.durationMinutes}{' '}
-                        {t.schedule.minutesUnit})
+              {phase === 'awaiting_rest_ack' && (
+                <View style={styles.controlColumn}>
+                  {activeProfile.restMinutes > 0 && (
+                    <Pressable
+                      style={[styles.primaryBtn, { backgroundColor: '#059669' }]}
+                      onPress={() => void startRestFromAck()}>
+                      <ThemedText style={styles.primaryBtnText}>
+                        {t.today.actions.startRest}
                       </ThemedText>
-                      <ThemedText type="small" themeColor="textSecondary">
-                        {formatClockTime(slot.startAt)} – {formatClockTime(slot.endAt)}
+                    </Pressable>
+                  )}
+                  <View style={styles.controlRow}>
+                    <Pressable
+                      style={[styles.secondaryBtn, { backgroundColor: theme.backgroundElement }]}
+                      onPress={() => void snooze5Min()}>
+                      <ThemedText style={styles.secondaryBtnText}>
+                        {t.today.actions.snooze5}
                       </ThemedText>
-                    </View>
-                    {isFocus && (
-                      <ThemedText type="small" themeColor="textSecondary">
-                        {formatDurationText(slot.cumulativeFocusMinutes, settings.language)}
-                      </ThemedText>
+                    </Pressable>
+                    {activeProfile.restMinutes > 0 && (
+                      <Pressable
+                        style={[styles.secondaryBtn, { backgroundColor: theme.backgroundElement }]}
+                        onPress={() => void skipRest()}>
+                        <ThemedText style={styles.secondaryBtnText}>
+                          {t.today.actions.skipRest}
+                        </ThemedText>
+                      </Pressable>
                     )}
                   </View>
-                );
-              })}
+                </View>
+              )}
+
+              {phase === 'awaiting_focus_ack' && (
+                <Pressable
+                  style={[styles.primaryBtn, { backgroundColor: '#2563EB' }]}
+                  onPress={() => void startFocusFromAck()}>
+                  <ThemedText style={styles.primaryBtnText}>
+                    {t.today.actions.startFocus}
+                  </ThemedText>
+                </Pressable>
+              )}
+
+              {phase !== 'inactive' && phase !== 'outside_range' && (
+                <View style={styles.controlRow}>
+                  {phase !== 'paused' && phase !== 'completed_range' && (
+                    <Pressable
+                      style={[styles.secondaryBtn, { backgroundColor: '#DC262622' }]}
+                      onPress={() => void stopFocus()}>
+                      <ThemedText style={[styles.secondaryBtnText, { color: '#DC2626' }]}>
+                        {t.today.actions.stopFocus}
+                      </ThemedText>
+                    </Pressable>
+                  )}
+                  <Pressable
+                    style={[styles.secondaryBtn, { backgroundColor: theme.backgroundElement }]}
+                    onPress={() => void testAlarm()}>
+                    <ThemedText style={styles.secondaryBtnText}>
+                      {t.today.actions.testAlarm}
+                    </ThemedText>
+                  </Pressable>
+                  <Pressable
+                    style={[styles.secondaryBtn, { backgroundColor: theme.backgroundElement }]}
+                    onPress={() => void resetDay()}>
+                    <ThemedText style={styles.secondaryBtnText}>
+                      {t.today.actions.resetDay}
+                    </ThemedText>
+                  </Pressable>
+                </View>
+              )}
             </View>
-          </View>
+          )}
+
+          {/* Today's Timeline / Individual Session Preview */}
+          {timerMode === 'individual' ? (
+            <View style={styles.timelineSection}>
+              <ThemedText type="smallBold">{t.today.individualTimer.sessionTitle}</ThemedText>
+              <View
+                style={[
+                  styles.slotRow,
+                  {
+                    backgroundColor: theme.backgroundElement,
+                    borderColor:
+                      phase === 'focusing' || phase === 'paused' ? '#2563EB' : 'transparent',
+                    borderWidth: phase === 'focusing' || phase === 'paused' ? 2 : 0,
+                  },
+                ]}>
+                <View style={[styles.slotDot, { backgroundColor: '#2563EB' }]} />
+                <View style={styles.slotInfo}>
+                  <ThemedText type="smallBold">
+                    {t.today.focusLabel} ({previewMinutes} {t.schedule.minutesUnit})
+                  </ThemedText>
+                  <ThemedText type="small" themeColor="textSecondary">
+                    {formatClockTime(previewStartAt)} – {formatClockTime(previewEndAt)}
+                  </ThemedText>
+                </View>
+                <ThemedText type="small" themeColor="textSecondary">
+                  {formatDurationText(previewMinutes, settings.language)}
+                </ThemedText>
+              </View>
+            </View>
+          ) : (
+            <View style={styles.timelineSection}>
+              <ThemedText type="smallBold">{t.today.timelineTitle}</ThemedText>
+              <View style={styles.timelineList}>
+                {slots.slice(0, 24).map((slot) => {
+                  const isCurrent =
+                    currentSlot?.index === slot.index &&
+                    phase !== 'outside_range' &&
+                    phase !== 'inactive' &&
+                    phase !== 'completed_range';
+                  const isFocus = slot.type === 'focus';
+                  const accent = isFocus ? '#2563EB' : '#059669';
+                  return (
+                    <View
+                      key={slot.index}
+                      style={[
+                        styles.slotRow,
+                        {
+                          backgroundColor: theme.backgroundElement,
+                          borderColor: isCurrent ? accent : 'transparent',
+                          borderWidth: isCurrent ? 2 : 0,
+                        },
+                      ]}>
+                      <View style={[styles.slotDot, { backgroundColor: accent }]} />
+                      <View style={styles.slotInfo}>
+                        <ThemedText type="smallBold">
+                          {isFocus ? t.today.focusLabel : t.today.restLabel} ({slot.durationMinutes}{' '}
+                          {t.schedule.minutesUnit})
+                        </ThemedText>
+                        <ThemedText type="small" themeColor="textSecondary">
+                          {formatClockTime(slot.startAt)} – {formatClockTime(slot.endAt)}
+                        </ThemedText>
+                      </View>
+                      {isFocus && (
+                        <ThemedText type="small" themeColor="textSecondary">
+                          {formatDurationText(slot.cumulativeFocusMinutes, settings.language)}
+                        </ThemedText>
+                      )}
+                    </View>
+                  );
+                })}
+              </View>
+            </View>
+          )}
         </View>
       </ScrollView>
 
@@ -430,6 +682,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 12,
   },
+  headerTextWrap: {
+    flex: 1,
+  },
   headerActions: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -452,6 +707,34 @@ const styles = StyleSheet.create({
   profileChipText: {
     fontSize: 13,
     fontWeight: '600',
+  },
+  quickCard: {
+    borderRadius: 18,
+    padding: 16,
+    gap: 12,
+  },
+  presetsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    alignItems: 'center',
+  },
+  presetChip: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 999,
+  },
+  presetChipText: {
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  durationInput: {
+    minWidth: 96,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 12,
+    fontSize: 14,
+    textAlign: 'center',
   },
   statsRow: {
     flexDirection: 'row',

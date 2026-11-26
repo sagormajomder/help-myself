@@ -7,7 +7,9 @@ import type {
   DailyStatsSummary,
   FocusProfile,
   FocusSessionLog,
+  IndividualTimerState,
   RuntimeTimerState,
+  TimerMode,
 } from '@/types/focus';
 import { getLocalDateKey } from '@/utils/schedule-calculator';
 
@@ -15,6 +17,8 @@ const KEYS = {
   SETTINGS: 'hm_app_settings_v1',
   PROFILES: 'hm_focus_profiles_v1',
   RUNTIME: 'hm_runtime_state_v1',
+  TIMER_MODE: 'hm_timer_mode_v1',
+  INDIVIDUAL_TIMER: 'hm_individual_timer_v1',
 } as const;
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -155,6 +159,39 @@ export async function saveRuntimeState(state: RuntimeTimerState | null): Promise
     return;
   }
   await setKvItem(KEYS.RUNTIME, JSON.stringify(state));
+}
+
+export async function loadTimerMode(): Promise<TimerMode> {
+  try {
+    const raw = await getKvItem(KEYS.TIMER_MODE);
+    return raw === 'individual' ? 'individual' : 'profile';
+  } catch {
+    return 'profile';
+  }
+}
+
+export async function saveTimerMode(mode: TimerMode): Promise<void> {
+  await setKvItem(KEYS.TIMER_MODE, mode);
+}
+
+export async function loadIndividualTimerState(): Promise<IndividualTimerState | null> {
+  try {
+    const raw = await getKvItem(KEYS.INDIVIDUAL_TIMER);
+    if (!raw) return null;
+    return JSON.parse(raw) as IndividualTimerState;
+  } catch {
+    return null;
+  }
+}
+
+export async function saveIndividualTimerState(
+  state: IndividualTimerState | null
+): Promise<void> {
+  if (!state) {
+    await setKvItem(KEYS.INDIVIDUAL_TIMER, '');
+    return;
+  }
+  await setKvItem(KEYS.INDIVIDUAL_TIMER, JSON.stringify(state));
 }
 
 export async function insertFocusSessionLog(log: FocusSessionLog): Promise<void> {

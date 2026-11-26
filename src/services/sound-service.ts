@@ -22,7 +22,7 @@ async function ensureAudioMode(): Promise<void> {
 }
 
 export async function playAlarmFeedback(
-  kind: 'focus_complete' | 'rest_complete' | 'range_complete',
+  kind: 'focus_complete' | 'rest_complete' | 'range_complete' | 'individual_complete',
   options: { soundEnabled: boolean; vibrationEnabled: boolean }
 ): Promise<void> {
   if (options.vibrationEnabled) {

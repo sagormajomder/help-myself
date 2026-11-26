@@ -86,8 +86,25 @@ export interface DailyStatsSummary {
   cyclesCount: number;
 }
 
+export type TimerMode = 'profile' | 'individual';
+
+export type IndividualTimerStatus = 'idle' | 'running' | 'paused' | 'completed';
+
+export interface IndividualTimerState {
+  /** Duration of the one-off timer in minutes (min 1, no rest) */
+  durationMinutes: number;
+  status: IndividualTimerStatus;
+  startedAt: number | null;
+  endAt: number | null;
+  pausedAt: number | null;
+  /** Local YYYY-MM-DD key for daily totals in individual mode */
+  dateKey: string;
+  completedFocusMinutesToday: number;
+  completedCyclesToday: number;
+}
+
 export interface AlarmEvent {
-  type: 'focus_complete' | 'rest_complete' | 'range_complete';
+  type: 'focus_complete' | 'rest_complete' | 'range_complete' | 'individual_complete';
   slotIndex: number;
   cumulativeFocusMinutes: number;
   restMinutes: number;

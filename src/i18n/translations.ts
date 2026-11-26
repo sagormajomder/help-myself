@@ -49,7 +49,22 @@ export interface TranslationStrings {
       focusDoneTitle: string;
       restDoneTitle: string;
       rangeDoneTitle: string;
+      individualDoneTitle: string;
       dismiss: string;
+    };
+    individualTimer: {
+      chipLabel: string;
+      headerSubtitle: string;
+      durationTitle: string;
+      noRestHint: string;
+      readySubtitle: string;
+      completedPhase: string;
+      completedSubtitle: string;
+      startButton: string;
+      stopButton: string;
+      sessionName: string;
+      sessionTitle: string;
+      invalidDuration: string;
     };
   };
   schedule: {
@@ -168,7 +183,22 @@ export const translations: Record<AppLanguage, TranslationStrings> = {
         focusDoneTitle: 'ফোকাস সময় পূর্ণ হয়েছে!',
         restDoneTitle: 'রেস্ট শেষ হয়েছে!',
         rangeDoneTitle: 'আজকের ফোকাস রেঞ্জ সম্পন্ন!',
+        individualDoneTitle: 'স্বতন্ত্র টাইমার সম্পন্ন!',
         dismiss: 'ঠিক আছে',
+      },
+      individualTimer: {
+        chipLabel: 'স্বতন্ত্র টাইমার',
+        headerSubtitle: 'প্রোফাইল সেভ ছাড়াই · কোনো রেস্ট নেই',
+        durationTitle: 'টাইমারের সময় (কোনো রেস্ট নেই)',
+        noRestHint: 'এটি এককালীন ফোকাস টাইমার — কোনো রেস্ট বা বিরতি থাকবে না।',
+        readySubtitle: 'সময় সেট করে শুরু করুন · রেস্ট ছাড়া',
+        completedPhase: 'টাইমার শেষ',
+        completedSubtitle: 'ফোকাস টাইমার সম্পন্ন হয়েছে',
+        startButton: 'টাইমার শুরু করুন',
+        stopButton: 'টাইমার বন্ধ করুন',
+        sessionName: 'স্বতন্ত্র টাইমার',
+        sessionTitle: 'সেশন প্রিভিউ',
+        invalidDuration: 'সঠিক ফোকাস মিনিট দিন (সর্বনিম্ন ১ মিনিট)।',
       },
     },
     schedule: {
@@ -287,7 +317,22 @@ export const translations: Record<AppLanguage, TranslationStrings> = {
         focusDoneTitle: 'Focus Milestone Reached!',
         restDoneTitle: 'Rest Time Over!',
         rangeDoneTitle: 'Daily Range Completed!',
+        individualDoneTitle: 'Timer Completed!',
         dismiss: 'Got it',
+      },
+      individualTimer: {
+        chipLabel: 'Individual Timer',
+        headerSubtitle: 'No profile saved · No rest option',
+        durationTitle: 'Timer Duration (No Rest)',
+        noRestHint: 'One-off countdown timer — no rest or break phase.',
+        readySubtitle: 'Set duration and start · No rest',
+        completedPhase: 'Timer Done',
+        completedSubtitle: 'Individual timer completed',
+        startButton: 'Start Timer',
+        stopButton: 'Stop Timer',
+        sessionName: 'Individual Timer',
+        sessionTitle: 'Session Preview',
+        invalidDuration: 'Please enter a valid duration (>= 1 min).',
       },
     },
     schedule: {
@@ -437,5 +482,22 @@ export function buildRangeDoneMessage(
   return {
     title: 'Daily Time Range Completed!',
     body: `Great job! You focused for ${totalStr} in total during today’s schedule.`,
+  };
+}
+
+export function buildIndividualDoneMessage(
+  focusMinutes: number,
+  lang: AppLanguage
+): { title: string; body: string } {
+  const durStr = formatDurationText(focusMinutes, lang);
+  if (lang === 'bn') {
+    return {
+      title: `${durStr} ফোকাস টাইমার শেষ!`,
+      body: `দারুণ! তুমি ${durStr} ফোকাস সেশন সম্পন্ন করেছো।`,
+    };
+  }
+  return {
+    title: `${durStr} Timer Complete!`,
+    body: `Great job! You completed a ${durStr} individual focus session.`,
   };
 }

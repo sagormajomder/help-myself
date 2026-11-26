@@ -7,6 +7,7 @@ import { Linking, Platform } from 'react-native';
 
 import {
   buildFocusDoneMessage,
+  buildIndividualDoneMessage,
   buildRangeDoneMessage,
   buildRestDoneMessage,
   translations,
@@ -336,4 +337,50 @@ export async function scheduleWindowAlarms(params: {
   }
 
   return scheduledCount;
+}
+
+export async function scheduleIndividualTimerAlarm(params: {
+  durationMinutes: number;
+  triggerAt: number;
+  settings: AppSettings;
+  nowMs?: number;
+}): Promise<number> {
+  if (Platform.OS === 'web') return 0;
+
+  const { durationMinutes, triggerAt, settings, nowMs = Date.now() } = params;
+  await setupNotificationChannelsAndCategories(settings.language);
+  await cancelAllScheduledAlarms();
+
+  if (triggerAt <= nowMs + 1000) return 0;
+
+  const { notificationsGranted } = await ensureNotificationPermissions();
+  if (!notificationsGranted) return 0;
+
+  const msg = buildIndividualDoneMessage(durationMinutes, settings.language);
+  const { channelId, sound } = getSoundAndChannel('focus', settings);
+
+  await Notifications.scheduleNotificationAsync({
+    content: {
+      title: msg.title,
+      body: msg.body,
+      sound: Platform.OS === 'ios' ? sound : undefined,
+      categoryIdentifier: undefined,
+      data: {
+        slotIndex: 0,
+        slotType: 'focus',
+        isFinalSlot: true,
+        isIndividualTimer: true,
+        cumulativeFocusMinutes: durationMinutes,
+        profileId: 'individual-timer',
+      },
+    },
+    trigger: {
+      type: Notifications.SchedulableTriggerInputTypes.DATE,
+      date: new Date(triggerAt),
+      channelId,
+      delivery: 'alarmClock',
+    },
+  });
+
+  return 1;
 }
