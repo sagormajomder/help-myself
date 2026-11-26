@@ -2,28 +2,25 @@ import DateTimePicker, {
   type DateTimePickerEvent,
 } from '@react-native-community/datetimepicker';
 import { router } from 'expo-router';
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import {
   Alert,
   Platform,
   Pressable,
   ScrollView,
   StyleSheet,
-  Switch,
   TextInput,
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { PermissionsCard } from '@/components/permissions-card';
+import { SettingsButton } from '@/components/settings-button';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
 import { useFocus } from '@/context/focus-context';
 import { useTheme } from '@/hooks/use-theme';
-import {
-  ensureNotificationPermissions,
-  requestExactAlarmPermission,
-} from '@/services/notification-service';
 import type { FocusProfile } from '@/types/focus';
 import { formatMinuteOfDay } from '@/utils/schedule-calculator';
 
@@ -40,11 +37,9 @@ export default function ScheduleScreen() {
   const safeInsets = useSafeAreaInsets();
   const theme = useTheme();
   const {
-    settings,
     t,
     profiles,
     activeProfile,
-    updateSettings,
     saveProfile,
     setActiveProfileId,
     deleteProfile,
@@ -61,7 +56,6 @@ export default function ScheduleScreen() {
 
   const [pickerTarget, setPickerTarget] = useState<'start' | 'end' | null>(null);
   const [feedbackMsg, setFeedbackMsg] = useState<string | null>(null);
-  const [exactAlarmOk, setExactAlarmOk] = useState(true);
 
   const populateFormFromProfile = (selected: FocusProfile) => {
     setSyncedProfileId(selected.id);
@@ -77,12 +71,6 @@ export default function ScheduleScreen() {
   if (activeProfile.id !== syncedProfileId) {
     populateFormFromProfile(activeProfile);
   }
-
-  useEffect(() => {
-    void ensureNotificationPermissions().then((res) => {
-      setExactAlarmOk(res.exactAlarmGranted);
-    });
-  }, []);
 
   const topPadding = Platform.OS === 'web' ? Spacing.six + 24 : safeInsets.top + Spacing.two;
   const bottomPadding = safeInsets.bottom + BottomTabInset + Spacing.four;
@@ -178,7 +166,10 @@ export default function ScheduleScreen() {
         ]}
         showsVerticalScrollIndicator={false}>
         <View style={styles.inner}>
-          <ThemedText type="subtitle">{t.schedule.title}</ThemedText>
+          <View style={styles.headerRow}>
+            <ThemedText type="subtitle">{t.schedule.title}</ThemedText>
+            <SettingsButton />
+          </View>
 
           {/* Profiles Section */}
           <View style={[styles.card, { backgroundColor: theme.backgroundElement }]}>
@@ -428,122 +419,8 @@ export default function ScheduleScreen() {
             </View>
           )}
 
-          {/* App Settings */}
-          <View style={[styles.card, { backgroundColor: theme.backgroundElement }]}>
-            <ThemedText type="smallBold">{t.schedule.settingsTitle}</ThemedText>
-
-            {/* Language Switch */}
-            <View style={styles.settingRow}>
-              <ThemedText>{t.schedule.languageLabel}</ThemedText>
-              <View style={styles.langToggle}>
-                <Pressable
-                  onPress={() => void updateSettings({ language: 'bn' })}
-                  style={[
-                    styles.langBtn,
-                    {
-                      backgroundColor:
-                        settings.language === 'bn' ? '#2563EB' : theme.backgroundSelected,
-                    },
-                  ]}>
-                  <ThemedText
-                    style={{
-                      color: settings.language === 'bn' ? '#FFFFFF' : theme.text,
-                      fontWeight: '700',
-                    }}>
-                    বাংলা
-                  </ThemedText>
-                </Pressable>
-                <Pressable
-                  onPress={() => void updateSettings({ language: 'en' })}
-                  style={[
-                    styles.langBtn,
-                    {
-                      backgroundColor:
-                        settings.language === 'en' ? '#2563EB' : theme.backgroundSelected,
-                    },
-                  ]}>
-                  <ThemedText
-                    style={{
-                      color: settings.language === 'en' ? '#FFFFFF' : theme.text,
-                      fontWeight: '700',
-                    }}>
-                    English
-                  </ThemedText>
-                </Pressable>
-              </View>
-            </View>
-
-            <View style={styles.settingRow}>
-              <View style={styles.settingTextWrap}>
-                <ThemedText>{t.schedule.autoContinueLabel}</ThemedText>
-                <ThemedText type="small" themeColor="textSecondary">
-                  {t.schedule.autoContinueDesc}
-                </ThemedText>
-              </View>
-              <Switch
-                value={settings.autoContinue}
-                onValueChange={(v) => void updateSettings({ autoContinue: v })}
-              />
-            </View>
-
-            <View style={styles.settingRow}>
-              <ThemedText>{t.schedule.soundLabel}</ThemedText>
-              <Switch
-                value={settings.soundEnabled}
-                onValueChange={(v) => void updateSettings({ soundEnabled: v })}
-              />
-            </View>
-
-            <View style={styles.settingRow}>
-              <View style={styles.settingTextWrap}>
-                <ThemedText>{t.schedule.voiceLabel}</ThemedText>
-                <ThemedText type="small" themeColor="textSecondary">
-                  {t.schedule.voiceDesc}
-                </ThemedText>
-              </View>
-              <Switch
-                value={settings.voiceEnabled}
-                onValueChange={(v) => void updateSettings({ voiceEnabled: v })}
-              />
-            </View>
-
-            <View style={styles.settingRow}>
-              <ThemedText>{t.schedule.vibrationLabel}</ThemedText>
-              <Switch
-                value={settings.vibrationEnabled}
-                onValueChange={(v) => void updateSettings({ vibrationEnabled: v })}
-              />
-            </View>
-          </View>
-
-          {/* Permissions & Battery Tip */}
-          {Platform.OS !== 'web' && (
-            <View style={[styles.card, { backgroundColor: theme.backgroundElement }]}>
-              <ThemedText type="smallBold">{t.schedule.permissionsTitle}</ThemedText>
-              <View style={styles.settingRow}>
-                <ThemedText type="small" style={{ flex: 1 }}>
-                  {exactAlarmOk ? t.schedule.exactAlarmOk : t.schedule.exactAlarmMissing}
-                </ThemedText>
-                {!exactAlarmOk && (
-                  <Pressable
-                    style={[styles.smallBtn, { backgroundColor: '#2563EB' }]}
-                    onPress={async () => {
-                      const granted = await requestExactAlarmPermission();
-                      setExactAlarmOk(granted);
-                    }}>
-                    <ThemedText style={{ color: '#FFFFFF', fontWeight: '700', fontSize: 12 }}>
-                      {t.schedule.requestPermission}
-                    </ThemedText>
-                  </Pressable>
-                )}
-              </View>
-
-              <ThemedText type="smallBold">{t.schedule.batteryTipTitle}</ThemedText>
-              <ThemedText type="small" themeColor="textSecondary">
-                {t.schedule.batteryTipBody}
-              </ThemedText>
-            </View>
-          )}
+          {/* Permissions & Device — auto-removed once all permissions are granted */}
+          <PermissionsCard />
         </View>
       </ScrollView>
     </ThemedView>
@@ -560,6 +437,12 @@ const styles = StyleSheet.create({
     width: '100%',
     maxWidth: MaxContentWidth,
     gap: 14,
+  },
+  headerRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 12,
   },
   card: {
     borderRadius: 18,
@@ -669,29 +552,5 @@ const styles = StyleSheet.create({
     padding: 12,
     borderRadius: 12,
     alignItems: 'center',
-  },
-  settingRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    gap: 12,
-  },
-  settingTextWrap: {
-    flex: 1,
-    gap: 2,
-  },
-  langToggle: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  langBtn: {
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 10,
-  },
-  smallBtn: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 10,
   },
 });

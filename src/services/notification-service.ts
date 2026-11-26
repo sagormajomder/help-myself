@@ -3,7 +3,7 @@ import {
   AndroidImportance,
   AndroidNotificationVisibility,
 } from 'expo-notifications';
-import { Platform } from 'react-native';
+import { Linking, Platform } from 'react-native';
 
 import {
   buildFocusDoneMessage,
@@ -130,23 +130,22 @@ export async function setupNotificationChannelsAndCategories(
   ]);
 }
 
-export async function ensureNotificationPermissions(): Promise<{
+export interface PermissionStatusSummary {
   notificationsGranted: boolean;
   exactAlarmGranted: boolean;
-}> {
+}
+
+export interface ExactAlarmRequestResult {
+  granted: boolean;
+  reason?: 'not_declared' | 'settings_opened' | 'error';
+}
+
+export async function getNotificationPermissionStatus(): Promise<PermissionStatusSummary> {
   if (Platform.OS === 'web') {
     return { notificationsGranted: false, exactAlarmGranted: false };
   }
 
   const current = await Notifications.getPermissionsAsync();
-  let notificationsGranted = current.granted;
-  if (!notificationsGranted) {
-    const requested = await Notifications.requestPermissionsAsync({
-      ios: { allowAlert: true, allowSound: true, allowBadge: false },
-    });
-    notificationsGranted = requested.granted;
-  }
-
   let exactAlarmGranted = true;
   if (Platform.OS === 'android') {
     try {
@@ -157,16 +156,73 @@ export async function ensureNotificationPermissions(): Promise<{
     }
   }
 
-  return { notificationsGranted, exactAlarmGranted };
+  return {
+    notificationsGranted: current.granted,
+    exactAlarmGranted,
+  };
 }
 
-export async function requestExactAlarmPermission(): Promise<boolean> {
-  if (Platform.OS !== 'android') return true;
+export async function ensureNotificationPermissions(): Promise<PermissionStatusSummary> {
+  if (Platform.OS === 'web') {
+    return { notificationsGranted: false, exactAlarmGranted: false };
+  }
+
+  const initial = await getNotificationPermissionStatus();
+  if (initial.notificationsGranted) {
+    return initial;
+  }
+
+  const requested = await Notifications.requestPermissionsAsync({
+    ios: { allowAlert: true, allowSound: true, allowBadge: false },
+  });
+  return {
+    notificationsGranted: requested.granted,
+    exactAlarmGranted: initial.exactAlarmGranted,
+  };
+}
+
+export async function requestNotificationPermission(): Promise<boolean> {
+  if (Platform.OS === 'web') return false;
+
+  const current = await Notifications.getPermissionsAsync();
+  if (current.granted) return true;
+
+  const requested = await Notifications.requestPermissionsAsync({
+    ios: { allowAlert: true, allowSound: true, allowBadge: false },
+  });
+  if (requested.granted) return true;
+
+  // If the OS won't show the prompt again, take the user to App Settings so they can enable notifications
+  if (!requested.canAskAgain) {
+    await Linking.openSettings();
+  }
+  return false;
+}
+
+export async function requestExactAlarmPermission(): Promise<ExactAlarmRequestResult> {
+  if (Platform.OS !== 'android') return { granted: true };
+
   try {
+    const current = await Notifications.getExactAlarmPermissionsAsync();
+    if (current.granted) {
+      return { granted: true };
+    }
+
     const res = await Notifications.requestExactAlarmPermissionsAsync();
-    return res.granted;
-  } catch {
-    return false;
+    return { granted: res.granted };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (message.includes('SCHEDULE_EXACT_ALARM') || message.includes('not declare')) {
+      return { granted: false, reason: 'not_declared' };
+    }
+
+    // Fallback to App Info settings if the OEM rejects the direct exact-alarm intent
+    try {
+      await Linking.openSettings();
+      return { granted: false, reason: 'settings_opened' };
+    } catch {
+      return { granted: false, reason: 'error' };
+    }
   }
 }
 

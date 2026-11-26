@@ -1,6 +1,6 @@
 import * as Notifications from 'expo-notifications';
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { AppState } from 'react-native';
+import { AppState, Platform } from 'react-native';
 
 import {
   buildFocusDoneMessage,
@@ -12,6 +12,8 @@ import {
 import {
   cancelAllScheduledAlarms,
   configureForegroundNotificationHandler,
+  ensureNotificationPermissions,
+  getNotificationPermissionStatus,
   NOTIFICATION_ACTION,
   scheduleWindowAlarms,
   setupNotificationChannelsAndCategories,
@@ -66,6 +68,15 @@ interface FocusContextValue {
   nextAlarmAt: number | null;
   activeAlarm: AlarmEvent | null;
   statsRevision: number;
+  settingsModalVisible: boolean;
+  notificationsGranted: boolean;
+  exactAlarmGranted: boolean;
+  hasMissingPermissions: boolean;
+  openSettingsModal: () => void;
+  closeSettingsModal: () => void;
+  setNotificationsGrantedState: (granted: boolean) => void;
+  setExactAlarmGrantedState: (granted: boolean) => void;
+  refreshPermissions: () => Promise<void>;
   updateSettings: (patch: Partial<AppSettings>) => Promise<void>;
   saveProfile: (profile: FocusProfile, startImmediately?: boolean) => Promise<void>;
   setActiveProfileId: (id: string) => Promise<void>;
@@ -222,6 +233,9 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
   const [runtime, setRuntime] = useState<RuntimeTimerState | null>(null);
   const [activeAlarm, setActiveAlarm] = useState<AlarmEvent | null>(null);
   const [statsRevision, setStatsRevision] = useState(0);
+  const [settingsModalVisible, setSettingsModalVisible] = useState(false);
+  const [notificationsGranted, setNotificationsGranted] = useState(true);
+  const [exactAlarmGranted, setExactAlarmGranted] = useState(true);
 
   const handledSlotsRef = useRef<Set<string>>(new Set());
 
@@ -318,6 +332,12 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
       if (!mounted) return;
       setRuntime(initialRuntime);
       setReady(true);
+
+      const permStatus = await ensureNotificationPermissions();
+      if (mounted) {
+        setNotificationsGranted(permStatus.notificationsGranted);
+        setExactAlarmGranted(permStatus.exactAlarmGranted);
+      }
 
       await syncNotifications(
         currentActive,
@@ -561,6 +581,12 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
     [syncNotifications, triggerAlarm]
   );
 
+  const refreshPermissions = useCallback(async () => {
+    const status = await getNotificationPermissionStatus();
+    setNotificationsGranted(status.notificationsGranted);
+    setExactAlarmGranted(status.exactAlarmGranted);
+  }, []);
+
   // Foreground 1-second clock tick & AppState sync
   useEffect(() => {
     if (!ready) return;
@@ -574,13 +600,14 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
         const now = Date.now();
         setNowMs(now);
         evaluateTick(now);
+        void refreshPermissions();
       }
     });
     return () => {
       clearInterval(interval);
       sub.remove();
     };
-  }, [evaluateTick, ready]);
+  }, [evaluateTick, ready, refreshPermissions]);
 
   const pauseTimer = useCallback(async () => {
     if (!runtime || runtime.pausedAt !== null) return;
@@ -965,6 +992,19 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
     setStatsRevision((v) => v + 1);
   }, []);
 
+  const openSettingsModal = useCallback(() => {
+    void refreshPermissions();
+    setSettingsModalVisible(true);
+  }, [refreshPermissions]);
+
+  const closeSettingsModal = useCallback(() => {
+    setSettingsModalVisible(false);
+  }, []);
+
+  const hasMissingPermissions =
+    Platform.OS !== 'web' &&
+    (!notificationsGranted || (Platform.OS === 'android' && !exactAlarmGranted));
+
   const shift = runtime?.shiftOffsetMs ?? 0;
   const currentSlot = runtime ? (slots[runtime.currentSlotIndex] ?? null) : null;
   const phase: TimerPhase = runtime?.phase ?? 'inactive';
@@ -1009,6 +1049,15 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
     nextAlarmAt,
     activeAlarm,
     statsRevision,
+    settingsModalVisible,
+    notificationsGranted,
+    exactAlarmGranted,
+    hasMissingPermissions,
+    openSettingsModal,
+    closeSettingsModal,
+    setNotificationsGrantedState: setNotificationsGranted,
+    setExactAlarmGrantedState: setExactAlarmGranted,
+    refreshPermissions,
     updateSettings,
     saveProfile,
     setActiveProfileId,

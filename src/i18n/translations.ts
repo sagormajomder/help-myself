@@ -83,9 +83,13 @@ export interface TranslationStrings {
     saveAndStartButton: string;
     savedToast: string;
     permissionsTitle: string;
+    notificationsOk: string;
+    notificationsMissing: string;
     exactAlarmOk: string;
     exactAlarmMissing: string;
     requestPermission: string;
+    exactAlarmRebuildBody: string;
+    openSettings: string;
     batteryTipTitle: string;
     batteryTipBody: string;
     validationError: string;
@@ -168,7 +172,7 @@ export const translations: Record<AppLanguage, TranslationStrings> = {
       },
     },
     schedule: {
-      title: 'শিডিউল ও সেটিংস',
+      title: 'ফোকাস শিডিউল',
       profilesTitle: 'ফোকাস প্রোফাইল',
       addProfile: '+ নতুন প্রোফাইল',
       newProfileDefault: 'নতুন রুটিন',
@@ -198,9 +202,14 @@ export const translations: Record<AppLanguage, TranslationStrings> = {
       saveAndStartButton: 'সেভ ও ফোকাস শুরু করুন',
       savedToast: 'প্রোফাইল সেভ হয়েছে! চাইলে এখনই ফোকাস শুরু করতে পারেন।',
       permissionsTitle: 'পারমিশন ও ডিভাইস',
+      notificationsOk: 'নোটিফিকেশন পারমিশন চালু আছে',
+      notificationsMissing: 'অ্যালার্ম পেতে নোটিফিকেশন পারমিশন দিন',
       exactAlarmOk: 'Exact Alarm পারমিশন চালু আছে',
       exactAlarmMissing: 'সঠিক সময়ে অ্যালার্মের জন্য Exact Alarm পারমিশন দিন',
       requestPermission: 'পারমিশন দিন',
+      exactAlarmRebuildBody:
+        'এই অ্যাপ বিল্ডে Exact Alarm (SCHEDULE_EXACT_ALARM) পারমিশন যুক্ত নেই। নতুন করে Android বিল্ড তৈরি করুন, অথবা অ্যাপ সেটিংস থেকে পরীক্ষা করুন।',
+      openSettings: 'সেটিংস খুলুন',
       batteryTipTitle: 'ব্যাকগ্রাউন্ড অ্যালার্ম টিপস',
       batteryTipBody:
         'Xiaomi, Samsung বা OnePlus ফোনে ঠিক সময়ে অ্যালার্ম পেতে App Info -> Battery-তে "Unrestricted" সিলেক্ট করুন।',
@@ -282,7 +291,7 @@ export const translations: Record<AppLanguage, TranslationStrings> = {
       },
     },
     schedule: {
-      title: 'Schedule & Settings',
+      title: 'Focus Schedule',
       profilesTitle: 'Focus Profiles',
       addProfile: '+ New Profile',
       newProfileDefault: 'New Routine',
@@ -314,9 +323,14 @@ export const translations: Record<AppLanguage, TranslationStrings> = {
       saveAndStartButton: 'Save & Start Focus',
       savedToast: 'Profile saved! Start focus whenever you are ready.',
       permissionsTitle: 'Permissions & Device',
+      notificationsOk: 'Notification permission granted',
+      notificationsMissing: 'Grant notification permission to receive alarms',
       exactAlarmOk: 'Exact Alarm permission granted',
       exactAlarmMissing: 'Grant Exact Alarm permission for on-time alarms',
       requestPermission: 'Grant Permission',
+      exactAlarmRebuildBody:
+        'This app build does not declare the Exact Alarm (SCHEDULE_EXACT_ALARM) permission yet. Rebuild the Android app, or check App Settings.',
+      openSettings: 'Open Settings',
       batteryTipTitle: 'Background Alarm Tip',
       batteryTipBody:
         'On Xiaomi, Samsung, or OnePlus phones, set Battery to "Unrestricted" in App Info so alarms are never delayed.',

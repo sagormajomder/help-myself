@@ -4,6 +4,7 @@ import { useColorScheme } from 'react-native';
 
 import { AnimatedSplashOverlay } from '@/components/animated-icon';
 import AppTabs from '@/components/app-tabs';
+import { SettingsModal } from '@/components/settings-modal';
 import { FocusProvider } from '@/context/focus-context';
 
 SplashScreen.preventAutoHideAsync();
@@ -15,6 +16,7 @@ export default function TabLayout() {
       <FocusProvider>
         <AnimatedSplashOverlay />
         <AppTabs />
+        <SettingsModal />
       </FocusProvider>
     </ThemeProvider>
   );

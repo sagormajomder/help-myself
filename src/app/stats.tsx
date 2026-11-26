@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { SettingsButton } from '@/components/settings-button';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
@@ -87,13 +88,16 @@ export default function StatsScreen() {
         <View style={styles.inner}>
           <View style={styles.headerRow}>
             <ThemedText type="subtitle">{t.stats.title}</ThemedText>
-            {recentLogs.length > 0 && (
-              <Pressable onPress={handleClear}>
-                <ThemedText style={{ color: '#DC2626', fontWeight: '600', fontSize: 13 }}>
-                  {t.stats.clearHistory}
-                </ThemedText>
-              </Pressable>
-            )}
+            <View style={styles.headerActions}>
+              {recentLogs.length > 0 && (
+                <Pressable onPress={handleClear}>
+                  <ThemedText style={{ color: '#DC2626', fontWeight: '600', fontSize: 13 }}>
+                    {t.stats.clearHistory}
+                  </ThemedText>
+                </Pressable>
+              )}
+              <SettingsButton />
+            </View>
           </View>
 
           {/* 4 Summary Cards */}
@@ -214,6 +218,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    gap: 12,
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
   },
   grid: {
     flexDirection: 'row',

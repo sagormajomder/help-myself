@@ -11,6 +11,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AlarmModal } from '@/components/alarm-modal';
+import { SettingsButton } from '@/components/settings-button';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { TimerRing } from '@/components/timer-ring';
@@ -109,11 +110,14 @@ export default function TodayScreen() {
                 {formatMinuteOfDay(activeProfile.endMinuteOfDay)}
               </ThemedText>
             </View>
-            <Pressable
-              style={[styles.smallChipBtn, { backgroundColor: theme.backgroundElement }]}
-              onPress={() => router.push('/schedule')}>
-              <ThemedText type="smallBold">{t.today.actions.goToSchedule}</ThemedText>
-            </Pressable>
+            <View style={styles.headerActions}>
+              <Pressable
+                style={[styles.smallChipBtn, { backgroundColor: theme.backgroundElement }]}
+                onPress={() => router.push('/schedule')}>
+                <ThemedText type="smallBold">{t.today.actions.goToSchedule}</ThemedText>
+              </Pressable>
+              <SettingsButton />
+            </View>
           </View>
 
           <ScrollView
@@ -425,6 +429,11 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     gap: 12,
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
   smallChipBtn: {
     paddingHorizontal: 12,
