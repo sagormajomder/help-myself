@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "help-myself",
+    "name": "Help Myself",
     "slug": "help-myself",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -17,7 +17,14 @@
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"
+      ],
+      "package": "com.sagormajomder.helpmyself"
     },
     "web": {
       "output": "server",
@@ -32,11 +39,39 @@
           "image": "./assets/images/splash-icon.png",
           "imageWidth": 76
         }
-      ]
+      ],
+      [
+        "expo-notifications",
+        {
+          "sounds": [
+            "./assets/sounds/focus_chime.wav",
+            "./assets/sounds/rest_chime.wav",
+            "./assets/sounds/focus_voice_bn.wav",
+            "./assets/sounds/rest_voice_bn.wav",
+            "./assets/sounds/focus_voice_en.wav",
+            "./assets/sounds/rest_voice_en.wav"
+          ],
+          "enableRemoteNotifications": false
+        }
+      ],
+      "expo-audio",
+      "expo-sqlite",
+      "@react-native-community/datetimepicker",
+      "expo-asset"
     ],
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
+    },
+    "extra": {
+      "router": {
+        "asyncRoutes": {
+          "web": true
+        }
+      },
+      "eas": {
+        "projectId": "c203a3e0-52b2-4e7b-9eb7-847ef8edb705"
+      }
     }
   }
 }
